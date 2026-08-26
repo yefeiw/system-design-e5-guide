@@ -1,100 +1,100 @@
-# Q3 · Top-K / Heavy Hitters（最热 K 个项目）
+# Q3 · Top-K / Heavy Hitters
 
-> 难度：Medium ｜ 母题：写多 + 削峰（流式算法）
-> E5 高频题。考的是**精确性 vs 内存 vs 延迟**的三角 trade-off，一道题覆盖整个流处理世界观。
+> Difficulty: Medium ｜ archetype：write-heavy + peak shaving（streaming algorithm）
+> E5 high-frequency problems。考的是**accuracy vs memory vs latency**的三角 trade-off，一道题覆盖整个流处理世界观。
 
-## 1. 题目原文
+## 1. Problem Statement
 
-"设计一个系统，实时统计我们服务中访问量最高的 10 个 URL / 被播放最多的歌曲 / 最热门的标签，比如按小时和按天两个粒度。"
+"设计一个 system，real-time 统计我们 service 中访问量最高的 10 个 URL / 被播放最多的歌曲 / 最热门的标签，比如按小时和按天两个粒度。"
 
-## 2. 澄清问题清单
+## 2. Clarifying Questions
 
-| 问题 | 意图 |
+| 问题 | intent |
 |------|------|
-| "实时"要多实时？（秒级 / 分钟级 / 小时级）| 决定整套架构是流还是批 |
-| Top-K 要**精确**还是**近似**（±1% 误差可接受吗）| 本题最重要的问题，直接决定算法 |
-| 并列第 K 名怎么处理？ | 边界意识 |
-| 全量所有时间 vs 滚动窗口？ | 决定要不要窗口聚合 |
-| 流量多大？（1B events/day 量级?）| 内存可行性计算 |
+| "real-time"要多 real-time？（second-level / minute-level / hour-level）| 决定整套 architecture 是流还是批 |
+| Top-K 要**exact**还是**approximate**（±1% error margin acceptable 吗）| 本题最重要的问题，直接决定 algorithm |
+| 并列第 K 名怎么处理？ | boundary awareness |
+| 全量所有时间 vs 滚动 window？ | 决定要不要 window aggregation |
+| traffic 多大？（1B events/day order of magnitude?）| memory 可行性计算 |
 
-## 3. 估算演示
-
-```
-1B events/day ≈ 12K events/s 均值，峰值 ×5 ≈ 60K/s
-去重后不同 item 数（基数）：假设 100M 个不同 URL
-精确计数内存 = 100M × (8B key指纹 + 8B 计数) ≈ 1.6GB —— 其实可行！
-结论 → 先问清楚：如果基数可控，精确方案内存扛得住，别急着上近似算法
-```
-
-**这步是 E5 关键**：很多人背了 Count-Min Sketch 就无脑上，但 100M 基数精确哈希表也就 2GB，单机都放得下。**先算，再选算法**。
-
-## 4. 高层设计
+## 3. Estimation Walkthrough
 
 ```
-事件源 ──▶ Kafka（按 item_id 分区，保证同 key 聚到同一分区）
+1B events/day ≈ 12K events/s average，peak ×5 ≈ 60K/s
+dedup 后不同 item 数（cardinality）：假设 100M 个不同 URL
+exact counter memory = 100M × (8B key 指纹 + 8B counter) ≈ 1.6GB —— 其实可行！
+takeaway → 先问清楚：如果 cardinality 可控，exact approach memory 扛得住，别急着上 approximate algorithm
+```
+
+**这步是 E5 关键**：很多人背了 Count-Min Sketch 就无脑上，但 100M cardinality exact hash table 也就 2GB，single machine 都放得下。**先算，再选 algorithm**。
+
+## 4. High-Level Design
+
+```
+event 源 ──▶ Kafka（按 item_id partition，保证同 key 聚到同一 partition）
               │
-              ├──▶ 流式聚合器（每分区维护 item→count 哈希表 + 小顶堆(top K)）
-              │         │ 周期性（分钟级）输出 (item, count)
-              │         ▼
-              │      聚合 Top-K 合并器 ──▶ 查询服务（Redis/内存存当前 Top-K）
+              ├──▶ stream aggregator（每 partition 维护 item→count hash table + min-heap(top K)）
+              │ │ 周期性（minute-level）输出 (item, count)
+              │ ▼
+              │ aggregation Top-K merger ──▶ query service（Redis/memory 存当前 Top-K）
               │
-              └──▶ 数据湖（原始事件留存，夜间批处理校正 = 精确兜底）
+              └──▶ data lake（raw event 留存，nightly batch processing 校正 = exact fallback）
 ```
 
-**架构叙事**："热路径 Kafka 按分区分流，每分区流式计数 + 局部 Top-K 堆，轻量合并层把各分区局部 Top-K 合并成全局——因为 **局部 Top-K 的并集必然包含全局 Top-K**（每项的全局计数 ≥ 任一分区局部计数，第 K 名在它最强的那个分区里必然进局部 Top-K），所以合并器只需要处理 K×分区数 个候选，不需要全量排序。"
+**architecture 叙事**："hot path Kafka 按 partition 分流，每 partition 流式 counter + local Top-K heap，轻量 merge 层把各 partition local Top-K merge 成 global——因为 **local Top-K 的并集必然包含 global Top-K**（每项的 global counter ≥ 任一 partition local counter，第 K 名在它最强的那个 partition 里必然进 local Top-K），所以 merger 只需要处理 K×partition count 个 candidates，不需要全量 ranking。"
 
 能讲出上面括号里那个论证，就是这道题的 E5 时刻。
 
-## 5. 数据模型
+## 5. Data Model
 
-- 分区内：`HashMap<item_id, count>` + 小顶堆（size K，O(n log K)）
-- 窗口数据：分钟级局部聚合落 Redis / 按小时分区落 Parquet
-- 服务层：`(window, rank) → (item, count)`，短 TTL
+- partition 内：`HashMap<item_id, count>` + min-heap（size K，O(n log K)）
+- window data：minute-level local aggregation 落 Redis / 按小时 partition 落 Parquet
+- service tier：`(window, rank) → (item, count)`，短 TTL
 
-## 6. 深挖
+## 6. Deep Dives
 
-### 深挖 A · 内存不够怎么办：近似算法家族
+### Deep Dive A · memory 不够怎么办：approximate algorithm 家族
 
-当基数到几十亿、精确哈希表放不下时：
+当 cardinality 到几十亿、exact hash table 放不下时：
 
-| 算法 | 空间 | 误差方向 | 备注 |
+| algorithm | 空间 | error margin 方向 | 备注 |
 |------|------|---------|------|
-| Count-Min Sketch | O(k/ε·log n) | **只高不低**（单向误差）| 重击者误差相对小；可合并（各分区 sketch 可相加）|
-| Space-Saving | O(K/ε) | 单向 | 直接维护近似 Top-K，工程常用 |
-| Lossy Counting | 批处理式 | 单向 | 老牌但已被前两者盖过 |
+| Count-Min Sketch | O(k/ε·log n) | **只高不低**（one-way error margin）| 重击者 error margin 相对小；可 merge（各 partition sketch 可相加）|
+| Space-Saving | O(K/ε) | one-way | 直接维护 approximate Top-K，工程常用 |
+| Lossy Counting | batch processing 式 | one-way | 老牌但已被前两者盖过 |
 
-E5 表达："近似算法在重击者（heavy hitter）上的相对误差小——计数 100 万的 item 估成 102 万无所谓；误差全集中在长尾，而长尾本来就不进 Top-K。**这就是近似算法恰好适配 Top-K 问题的原因**，不是巧合是结构。"
+E5 表达："approximate algorithm 在重击者（heavy hitter）上的相对 error margin 小——counter 100 万的 item 估成 102 万无所谓；error margin 全集中在 long tail，而 long tail 本来就不进 Top-K。**这就是 approximate algorithm 恰好适配 Top-K 问题的原因**，不是巧合是 structure。"
 
-以及必说的兜底："近似给实时视图，夜间批处理（Spark/Beam 对全天数据精确重算）覆盖修正——**lambda 架构的取舍**：实时层牺牲精度，批层牺牲时效，查询层合并。"
+以及必说的 fallback："approximate 给 real-time 视图，nightly batch processing（Spark/Beam 对全天 data exact recompute）覆盖修正——**lambda architecture 的取舍**：real-time layer 牺牲精度，batch layer 牺牲时效，query 层 merge。"
 
-### 深挖 B · 窗口语义
+### Deep Dive B · window semantics
 
-- 滚动窗口（tumbling）vs 滑动窗口（sliding）vs 会话窗口——**主动问面试官要哪种**
-- 滑动窗口的流式实现：分钟桶 + 近似组合（"最近 60 分钟 = 最近 60 个分钟桶求和"，误差 ≤ 1 分钟桶）
-- 乱序事件：watermark 机制——"数据迟到 5 分钟内我会更新结果，超过 watermark 的丢进 side output 离线补偿"
+- 滚动 window（tumbling）vs sliding window（sliding）vs session window——**主动问 interviewer 要哪种**
+- sliding window 的流式实现：分钟 bucket + approximate combination（"最近 60 分钟 = 最近 60 个分钟 bucket 求和"，error margin ≤ 1 分钟 bucket）
+- out-of-order event：watermark 机制——"data late-arriving 5 分钟内我会更新结果，超过 watermark 的丢进 side output offline 补偿"
 
-### 深挖 C · 一致性与故障
+### Deep Dive C · consistency 与 failure
 
-- 聚合器挂了 → Kafka offset 还在，**从上次提交的 offset 重放**（at-least-once）
-- 重复计数怎么处理：幂等（offset + item 组合去重窗口）或接受误差（计数类业务通常可接受）
-- "如果这是**计费**不是统计呢？"——那就不能用 at-least-once 糊弄，要 exactly-once（Kafka 事务 / 两阶段提交）或事件溯源 + 对账。**问出这题就是面试官在测你懂不懂投递语义的代价**
+- aggregator 挂了 → Kafka offset 还在，**从上次提交的 offset replay**（at-least-once）
+- 重复 counter 怎么处理：idempotent（offset + item combination dedup window）或接受 error margin（counter 类 business 通常 acceptable）
+- "如果这是**billing**不是统计呢？"——那就不能用 at-least-once 糊弄，要 exactly-once（Kafka transaction / two-phase commit）或 event sourcing + reconciliation。**问出这题就是 interviewer 在测你懂不懂 delivery semantics 的 cost**
 
-### 深挖 D · 查询侧
+### Deep Dive D · query 侧
 
-- Top-K 查询 QPS 高 → 预计算 + Redis 缓存，刷新频率 = 业务"实时"要求
-- 多维度 Top-K（按国家×按品类）→ 维度组合爆炸，只预计算高频组合，长尾走现场聚合
+- Top-K query QPS 高 → 预计算 + Redis cache，refresh 频率 = business"real-time"requirement
+- 多 dimension Top-K（按国家×按品类）→ dimension combination 爆炸，只预计算 high-frequency combination，long tail 走 on-the-fly aggregation
 
-## 7. 红牌答案
+## 7. Red Flags
 
-- 上来就 Count-Min Sketch（没先算精确方案的内存可行性）
-- 把全量事件塞进一个全局堆（没有分区局部 Top-K 的洞察）
-- "实时"不问清楚就开始设计
-- 讲不出局部 Top-K 合并的正确性论证
-- 数据丢了就丢了，没投递语义意识
+- 上来就 Count-Min Sketch（没先算 exact approach 的 memory 可行性）
+- 把全量 event 塞进一个 global heap（没有 partition local Top-K 的洞察）
+- "real-time"不问清楚就开始设计
+- 讲不出 local Top-K merge 的 correctness 论证
+- data 丢了就丢了，没 delivery semantics awareness
 
-## 8. 一分钟电梯版
+## 8. One-Minute Elevator Pitch
 
-"事件进 Kafka 按 item 分区，每分区流式维护计数哈希 + 小顶堆，局部 Top-K 合并出全局——合并的正确性来自全局第 K 名必然是其最强分区的局部前 K。基数一亿内精确哈希才 2GB，我先算再决定要不要近似；基数到十亿级换 Count-Min Sketch（误差单向且集中在长尾，恰好不伤 Top-K），夜间批处理做精确兜底，这就是 lambda。窗口语义、迟到数据 watermark、at-least-once 重放的重复计数——统计业务可接受，计费业务必须换 exactly-once，代价是吞吐减半。"
+"event 进 Kafka 按 item partition，每 partition 流式维护 counter hash + min-heap，local Top-K merge 出 global——merge 的 correctness 来自 global 第 K 名必然是其最强 partition 的 local 前 K。cardinality 一亿内 exact hash 才 2GB，我先算再决定要不要 approximate；cardinality 到十亿级换 Count-Min Sketch（error margin one-way 且集中在 long tail，恰好不伤 Top-K），nightly batch processing 做 exact fallback，这就是 lambda。window semantics、late data watermark、at-least-once replay 的重复 counter——统计 business acceptable，billing business 必须换 exactly-once，cost 是 throughput 减半。"
 
 ---
-← [Q2 限流器](02-rate-limiter.md) ｜ [Q4 聊天系统 →](04-chat-system.md)
+← [Q2 rate limiter](02-rate-limiter.md) ｜ [Q4 chat system →](04-chat-system.md)

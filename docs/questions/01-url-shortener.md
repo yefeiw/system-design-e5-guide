@@ -1,54 +1,54 @@
-# Q1 · 短链服务（URL Shortener）
+# Q1 · URL Shortener
 
-> 难度：Easy ｜ 母题：读多写少 + 缓存
-> 看似简单，其实是**把「ID 生成」「缓存」「重定向链路」三个深挖点打穿**的最佳练手题。
+> Difficulty: Easy ｜ archetype：read-heavy + cache
+> 看似简单，其实是**把「ID generate」「cache」「redirect 链路」三个 deep-dive spots 打穿**的最佳练手题。
 
-## 1. 题目原文
+## 1. Problem Statement
 
-"设计一个类似 bit.ly 的短链服务。用户提交长 URL，得到一个短链接，访问短链接跳转到原 URL。"
+"设计一个类似 bit.ly 的 URL shortener。user 提交长 URL，得到一个 short URL 接，访问 short URL 接跳转到原 URL。"
 
-## 2. 澄清问题清单
+## 2. Clarifying Questions
 
 | 问题 | 为什么问 |
 |------|---------|
-| 短链需要自定义别名吗？（`bit.ly/my-wedding`）| 影响 ID 生成的整个设计 |
-| 链接过期吗？永久有效？ | 存储估算和清理策略 |
-| 需要点击统计吗（分析功能）？ | **这题最大的隐藏需求**——决定要不要写入点击日志管道 |
-| DAU / 读写字数级？ | 决定缓存层必要性 |
-| 读延迟要求？（301 vs 302 的意义）| 展示 HTTP 细节的机会 |
+| short URL 需要自 definitions 别名吗？（`bit.ly/my-wedding`）| 影响 ID generate 的整个设计 |
+| 链接过期吗？永久有效？ | storage estimation 和 cleanup strategy |
+| 需要 click 统计吗（分析 feature）？ | **这题最大的隐藏需求**——决定要不要 write 入 click log pipeline |
+| DAU / read write 字数级？ | 决定 cache 层必要性 |
+| read latency requirement？（301 vs 302 的意义）| impression HTTP 细节的机会 |
 
-**范围收敛话术**："我聚焦创建/读取/重定向三个核心功能 + 点击计数；自定义域名和过期管理放到 follow-up。"
+**scope convergence script**："我聚焦创建/read 取/redirect 三个 core feature + click counter；自 definitions 域名和过期管理放到 follow-up。"
 
-## 3. 估算演示（假设 100M DAU，人均 5 读 0.1 写）
-
-```
-读 QPS ≈ 5,800（峰值 ~17K）  写 QPS ≈ 115
-存储   ≈ 500B × 4B 条/年 ≈ 2TB/年（含索引 ×2 = 4TB）
-带宽   ≈ 17K × 1KB ≈ 17MB/s（轻）
-结论   → 读路径必须缓存；写和存储毫无压力 → 单写多读教科书场景
-```
-
-## 4. 高层设计
+## 3. Estimation Walkthrough（假设 100M DAU，per-user 5 read 0.1 write）
 
 ```
-客户端 ──POST /url──▶ LB ──▶ 短链服务（无状态）──▶ ID 生成器
+read QPS ≈ 5,800（peak ~17K） write QPS ≈ 115
+storage ≈ 500B × 4B 条/年 ≈ 2TB/年（含 index ×2 = 4TB）
+bandwidth ≈ 17K × 1KB ≈ 17MB/s（轻）
+takeaway → read path 必须 cache；write 和 storage 毫无压力 → 单 write-heavy read 教科书 scenario
+```
+
+## 4. High-Level Design
+
+```
+client ──POST /url──▶ LB ──▶ URL shortener（stateless）──▶ ID generate 器
                                    │
                                    ▼
                                 MySQL（主从）
-客户端 ──GET /abc123──▶ LB ──▶ 短链服务 ──▶ Redis 缓存 ──(miss)──▶ MySQL
+client ──GET /abc123──▶ LB ──▶ URL shortener ──▶ Redis cache ──(miss)──▶ MySQL
                                    │
                                    ▼
-                              返回 301/302 + 原URL
-（点击事件 ──▶ Kafka ──▶ 分析管道，若题目要统计）
+                              return 301/302 + 原 URL
+（click event ──▶ Kafka ──▶ 分析 pipeline，若题目要统计）
 ```
 
-数据流口述版："创建走服务层拿唯一 ID、编码成短码、写主库；访问走缓存优先，miss 回源并回填。"
+data flow 口述版："创建走 service tier 拿唯一 ID、编码成短码、write 主库；访问走 cache 优先，miss 回源并回填。"
 
-## 5. 数据模型
+## 5. Data Model
 
 ```sql
--- MySQL 即可（强一致 + 事务 + 单表索引简单）
-short_url (id BIGINT PK,          -- 全局自增或雪花 ID
+-- MySQL 即可（strongly consistent + transaction + 单表 index 简单）
+short_url (id BIGINT PK, -- global auto-increment 或 Snowflake ID
            code VARCHAR(7) UNIQUE,-- base62 编码
            original_url TEXT,
            created_by BIGINT,
@@ -57,47 +57,47 @@ short_url (id BIGINT PK,          -- 全局自增或雪花 ID
 INDEX (created_by), INDEX (expires_at)
 ```
 
-**为什么 SQL 不是 DynamoDB**："写只有百级 QPS，关系型毫无压力，且过期清理、按用户查询都要灵活索引——引入 KV 反而丢失这些。规模撑死单库 + 读写分离。"
+**为什么 SQL 不是 DynamoDB**："write 只有百级 QPS，关系型毫无压力，且过期 cleanup、按 user query 都要灵活 index——引入 KV 反而丢失这些。scale 撑死 single database + read write 分离。"
 
-## 6. 深挖
+## 6. Deep Dives
 
-### 深挖 A · ID 怎么生成（本题经典）
+### Deep Dive A · ID 怎么 generate（本题经典）
 
-| 方案 | 优点 | 缺点 / E5 必须说出来 |
+| approach | 优点 | 缺点 / E5 必须说出来 |
 |------|------|---------------------|
-| DB 自增 ID | 简单、无冲突 | 单点；暴露总数（爬虫可枚举你的量）；分库后要步长分段 |
-| UUID | 无协调 | 128 位太长、无序（B+ 树页分裂）→ 短码场景直接排除 |
-| **号段模式（Leaf/美团）** | DB 只发段，扛高写 | 号段服务要 HA；段内单调 |
-| 雪花 Snowflake | 趋势递增、去中心化 | **时钟回拨**问题；机器位要规划 |
+| DB auto-increment ID | 简单、无冲突 | SPOF；暴露总数（爬虫可枚举你的量）；分库后要步长分段 |
+| UUID | 无协调 | 128 位太长、无序（B+ 树页分裂）→ 短码 scenario 直接排除 |
+| **号段模式（Leaf/美团）** | DB 只发段，扛高 write | 号段 service 要 HA；段内 monotonic |
+| Snowflake Snowflake | 趋势递增、去中心化 | **clock 回拨**问题；machine 位要规划 |
 
-E5 标准答案："写 QPS 才 115，我选 DB 自增 + 号段缓存就够——为一个低频写引入雪花的时间位纯属 over-engineer。如果题改成十亿级写，我会换雪花并处理时钟回拨（等待/报错/备份位）。"
+E5 standard answers："write QPS 才 115，我选 DB auto-increment + 号段 cache 就够——为一个低频 write 引入 Snowflake 的时间位纯属 over-engineer。如果题改成十亿级 write，我会换 Snowflake 并处理 clock 回拨（等待/报错/备份位）。"
 
-### 深挖 B · Base62 与碰撞
+### Deep Dive B · Base62 与碰撞
 
 - 62^7 ≈ 3.5 万亿，7 位编码足够
-- 自增 ID → base62 **天然无碰撞**（这是选自增的隐藏红利，说出来是加分）
-- 若哈希取前 7 位 → 必须处理碰撞（查库重试）→ 讲得出"所以我不选哈希"是 trade-off 表达
+- auto-increment ID → base62 **天然无碰撞**（这是选 auto-increment 的隐藏红利，说出来是加分）
+- 若 hash 取前 7 位 → 必须处理碰撞（查库 retry）→ 讲得出"所以我不选 hash"是 trade-off 表达
 
-### 深挖 C · 301 vs 302 与缓存
+### Deep Dive C · 301 vs 302 与 cache
 
-> "301 永久重定向会被浏览器缓存——**后续点击不再到我们服务器，点击统计就废了**。要统计就 302 临时重定向，代价是每次都回源，读压力全在我们这。所以这个选择取决于业务更在乎统计准确还是响应延迟。"
+> "301 永久 redirect 会被浏览器 cache——**后续 click 不再到我们 server，click 统计就废了**。要统计就 302 临时 redirect，cost 是每次都回源，read 压力全在我们这。所以这个选择取决于 business 更在乎统计准确还是 response latency。"
 
 这一段是本题最 E5 的 30 秒。
 
-### 深挖 D · 热点
+### Deep Dive D · hot spot
 
-"热门短链（病毒传播）单 key 会被打到单个 Redis 分片 → local cache（进程内 LRU）做第一层 + 逻辑过期防击穿。"
+"热门 short URL（病毒传播）单 key 会被打到单个 Redis sharding → local cache（in-process LRU）做第一层 + logical expiration 防 stampede。"
 
-## 7. 红牌答案
+## 7. Red Flags
 
-- 上来就"分库分表 128 个库"（写 115 QPS 分什么）
-- 用哈希 + 不谈碰撞处理
-- 只说"加 Redis"，不谈命中率/失效策略/热点
-- 301/302 的统计问题没意识（被面试官点破后才反应）
+- 上来就"sharding 128 个库"（write 115 QPS 分什么）
+- 用 hash + 不谈碰撞处理
+- 只说"加 Redis"，不谈 hit rate/invalidation 策略/hot spot
+- 301/302 的统计问题没 awareness（被 interviewer 点破后才反应）
 
-## 8. 一分钟电梯版
+## 8. One-Minute Elevator Pitch
 
-"读写比 1000:1，写走 DB 自增 + base62 编码天然无碰撞；读走 Redis cache-aside + 进程内二级缓存扛热点；301 vs 302 取决于要不要点击统计——要统计就得 302 回源，那就把缓存命中率做成核心 SLI。点击日志异步进 Kafka 做分析。存储量级 2TB/年，单库主从足够，不为这个规模引入任何分布式组件。"
+"read/write ratio 1000:1，write 走 DB auto-increment + base62 编码天然无碰撞；read 走 Redis cache-aside + in-process 二级 cache 扛 hot spot；301 vs 302 取决于要不要 click 统计——要统计就得 302 回源，那就把 cache hit rate 做成 core SLI。click log async 进 Kafka 做分析。storage order of magnitude 2TB/年，single database 主从足够，不为这个 scale 引入任何 distributed 组件。"
 
 ---
-← [06 真题总览](../06-classic-questions-overview.md) ｜ [Q2 限流器 →](02-rate-limiter.md)
+← [06 classic problems overview](../06-classic-questions-overview.md) ｜ [Q2 rate limiter →](02-rate-limiter.md)

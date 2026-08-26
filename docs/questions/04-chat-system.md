@@ -1,124 +1,124 @@
-# Q4 · 聊天系统（Chat / Messaging）
+# Q4 · Chat / Messaging
 
-> 难度：Medium ｜ 母题：状态同步（长连接）
-> 把「连接层 / 消息投递语义 / 群聊扇出」三件事讲清楚，这题就赢了。深挖可以无限深，是展示功底的好题。
+> Difficulty: Medium ｜ archetype：state sync（long-lived connection）
+> 把「connection layer / message delivery semantics / group chat 扇出」三件事讲清楚，这题就赢了。deep dive 可以无限深，是 impression 功底的好题。
 
-## 1. 题目原文
+## 1. Problem Statement
 
-"设计一个 WhatsApp/微信级别的聊天系统：一对一聊天、在线状态、消息已读。"
+"设计一个 WhatsApp/微信级别的 chat system：一对一聊天、online presence、message read receipts。"
 
-## 2. 澄清问题清单
+## 2. Clarifying Questions
 
-| 问题 | 意图 |
+| 问题 | intent |
 |------|------|
-| 群聊最大多少人？（1:1 / 百人群 / 万人直播群）| 扇出复杂度差三个量级 |
-| 在线状态要多实时？| 推送模型的选型依据 |
-| 消息保序的范围？（同一会话内？全局？）| **必须问**——保序是这题的技术核心 |
-| 离线消息保留多久？| 存储估算 |
-| 多设备同步要不要？| 同步语义复杂度翻倍 |
-| 媒体消息（图片/视频）？| 分离媒体管道（本题可先略，提一句）|
+| group chat 最大多少人？（1:1 / 百人群 / 万人直播群）| 扇出复杂度差三个 order of magnitude |
+| online presence 要多 real-time？| push model 的 selection 依据 |
+| message 保序的 scope？（同一 session 内？global？）| **必须问**——保序是这题的技术 core |
+| offline messages retention period？| storage estimation |
+| multi-device sync 要不要？| sync semantics 复杂度翻倍 |
+| 媒体 message（图片/videos）？| 分离媒体 pipeline（本题可先略，提一句）|
 
-## 3. 估算演示
-
-```
-50M DAU，人均 40 条/天 ≈ 2B msg/day ≈ 23K msg/s 均值
-同时在线用户 ≈ DAU × 10~20% ≈ 5~10M 长连接
-单连接网关节点（16GB 内存）扛 ~100K 连接 → 需要 50~100 台连接层
-消息 160B（类 WhatsApp）+ 元数据 ≈ 500B/条
-存储 = 2B × 500B × 2(收发双方) × 1年 ≈ 700TB/年 → 必须分片
-```
-
-## 4. 高层设计
+## 3. Estimation Walkthrough
 
 ```
-                          ┌──────────── 连接层（无状态化）────────────┐
-客户端 A ──ws──▶ LB ──▶ Chat Gateway #1 ─┐
-                                          ├─▶ 路由服务（user → gateway 映射）
-客户端 B ──ws──▶ LB ──▶ Chat Gateway #2 ─┘         │
+50M DAU，per-user 40 条/天 ≈ 2B msg/day ≈ 23K msg/s average
+同时 online user ≈ DAU × 10~20% ≈ 5~10M long-lived connection
+单 connection gateway node（16GB memory）扛 ~100K connection → 需要 50~100 台 connection layer
+message 160B（类 WhatsApp）+ 元 data ≈ 500B/条
+storage = 2B × 500B × 2(收发双方) × 1 年 ≈ 700TB/年 → 必须 sharding
+```
+
+## 4. High-Level Design
+
+```
+                          ┌──────────── connection layer（stateless 化）────────────┐
+client A ──ws──▶ LB ──▶ Chat Gateway #1 ─┐
+                                          ├─▶ routing service（user → gateway 映射）
+client B ──ws──▶ LB ──▶ Chat Gateway #2 ─┘ │
                                                    ▼
-   消息管道：API ──▶ 消息服务 ──▶ Kafka（按 conversation_id 分区）
+   message pipeline：API ──▶ message service ──▶ Kafka（按 conversation_id partition）
                                   │
                                   ▼
-                          消息存储（Cassandra，按会话分区）
+                          message storage（Cassandra，按 session partition）
                                   │
                                   ▼
-                          投递服务 ──▶ 查路由 ──▶ 目标 gateway ──ws──▶ 客户端 B
-                                                       │（离线）
+                          delivery service ──▶ 查 routing ──▶ target gateway ──ws──▶ client B
+                                                       │（offline）
                                                        ▼
-                                                  推送服务(APNs/FCM)
-在线状态：心跳(分钟级) → 状态服务(Redis TTL) → 订阅者增量同步
-已读：客户端 ACK 携带 last_read_msg_id → 写回 → 反向通知对方
+                                                  push service(APNs/FCM)
+online presence：heartbeat(minute-level) → state service(Redis TTL) → subscription 者增量 sync
+read receipts：client ACK 携带 last_read_msg_id → write 回 → 反向通知对方
 ```
 
-## 5. 数据模型
+## 5. Data Model
 
 ```
-Cassandra（写多读点查、按会话聚簇、天然分片）：
+Cassandra（write-heavy read point lookups、按 session clustering、naturally shardable）：
 messages (
-  conversation_id UUID,      -- 分区键
-  message_id TIMEUUID,       -- 聚簇键，TIMEUUID 天然按时间有序 = 会话内保序
+  conversation_id UUID, -- partition key
+  message_id TIMEUUID, -- clustering key，TIMEUUID 天然按时间 ordered = session 内保序
   sender_id, content, type,
   created_at
 )
 
 inbox_state (
-  user_id,                   -- 分区键
+  user_id, -- partition key
   conversation_id,
   last_read_msg_id TIMEUUID,
   last_delivered_msg_id
-)  -- 每用户会话列表、未读数、已读游标
+) -- 每 user conversation list、未 read 数、read receipts 游标
 ```
 
-**为什么 Cassandra**："按 conversation_id 分区 → 一个会话的所有消息在同一节点 → 会话内顺序由聚簇键保证，**分区键 + 聚簇键的设计直接实现'会话内保序'这个核心需求**，这是 KV 宽列模型和需求天然咬合的案例。"
+**为什么 Cassandra**："按 conversation_id partition → 一个 session 的所有 message 在同一 node → session 内 ordering 由 clustering key 保证，**partition key + clustering key 的设计直接实现'session 内保序'这个 core 需求**，这是 KV wide-column model 和需求天然咬合的案例。"
 
-## 6. 深挖
+## 6. Deep Dives
 
-### 深挖 A · 长连接与投递模型（必考）
+### Deep Dive A · long-lived connection 与 delivery model（must-know）
 
-- **轮询 / 长轮询 / WebSocket / SSE** 四档对比——手机端省电 vs 实时性的 trade-off
-- WebSocket 双向低延迟但：连接状态在网关内存里 → **网关必须处理重连风暴**（地铁里一车厢人同时断线重连：随机退避 + 连接数限流）
-- **路由表**（user → gateway）放 Redis：网关上下线时清理（心跳 TTL），投递服务查表路由——"连接层无状态化"的关键就是路由外置
+- **polling / long polling / WebSocket / SSE** 四档 comparison——手机端省电 vs real-time 性的 trade-off
+- WebSocket 双向低 latency 但：connection state 在 gateway memory 里 → **gateway 必须处理重连 storm**（地铁里一车厢人同时断线重连：random backoff + connection count rate limiting）
+- **routing 表**（user → gateway）放 Redis：gateway 上下线时 cleanup（heartbeat TTL），delivery service 查表 routing——"connection layer stateless 化"的关键就是 routing 外置
 
-### 深挖 B · 消息投递语义（本题的 E5 核心区）
+### Deep Dive B · message delivery semantics（本题的 E5 core 区）
 
-三个状态机：**发送中 → 已送达（server ack）→ 已读（recipient ack）**。
+三个 state machine：**发送中 → 已送达（server ack）→ read receipts（recipient ack）**。
 
 必须主动讲的坑：
-- **去重**：客户端重发（超时重试）导致重复 → 客户端生成 message UUID，服务端幂等去重
-- **顺序**：接收端按 (conversation_id, message_id) 排序，不依赖到达顺序
-- **离线投递**：上线后按 inbox_state 游标拉增量——"推拉结合：在线走推送，推送失败/离线走拉取兜底"
-- 至少一次 + 幂等 = 事实上的恰好一次（**这套组合拳是分布式消息的万能答案**）
+- **dedup**：client 重发（timeout retry）导致重复 → client generate message UUID，server idempotent dedup
+- **ordering**：接收端按 (conversation_id, message_id) ranking，不依赖到达 ordering
+- **offline delivery**：上线后按 inbox_state 游标拉增量——"推拉结合：online 走 push，push 失败/offline 走 pull fallback"
+- 至少一次 + idempotent = 事实上的恰好一次（**这套 combination 拳是 distributed message 的万能答案**）
 
-### 深挖 C · 在线状态
+### Deep Dive C · online presence
 
-- 心跳（WebSocket ping，分钟级）→ Redis `user:{id}` 带 TTL——TTL 到期自动"下线"，不需要清理任务
-- 状态风暴：上线/下线事件别全员广播 → **按会话订阅**（你的好友打开会话才拉状态）
-- trade-off："状态允许 stale 30 秒，省下的是数百万 QPS 的状态同步。聊天场景没人会为'好友明明在线却显示离线'投诉。"
+- heartbeat（WebSocket ping，minute-level）→ Redis `user:{id}` 带 TTL——TTL 到期自动"下线"，不需要 cleanup 任务
+- state storm：上线/下线 event 别全员广播 → **按 session subscription**（你的好友打开 session 才拉 state）
+- trade-off："state 允许 stale 30 秒，省下的是数百万 QPS 的 state sync。聊天 scenario 没人会为'好友明明 online 却显示 offline'投诉。"
 
-### 深挖 D · 群聊扇出
+### Deep Dive D · group chat 扇出
 
-| 群规模 | 策略 |
+| 群 scale | 策略 |
 |--------|------|
-| ≤ 200 | 写扩散：一条消息 × N 个收件人 inbox 记录（WhatsApp 模型）|
-| 数千+ | 读扩散 + 写扩散混合：大群单独存一份，成员拉取；只给成员的会话列表写一条指针 |
+| ≤ 200 | write fan-out：一条 message × N 个收件人 inbox record（WhatsApp model）|
+| 数千+ | read fan-out + write fan-out 混合：大群单独存一份，成员 pull；只给成员的 conversation list write 一条指针 |
 
-"写扩散简单但 N 倍存储/写放大；读扩散省写但在线成员都要实时拉。**分界线按群规模划**，这是真实系统（微信/微博）的成熟做法。"
+"write fan-out 简单但 N 倍 storage/write amplification；read fan-out 省 write 但 online members 都要 real-time 拉。**dividing line 按群 scale 划**，这是 real-world systems（微信/微博）的成熟做法。"
 
-### 深挖 E · 多设备同步
+### Deep Dive E · multi-device sync
 
-每设备独立 `device_id` + 独立已读/已送达游标；消息按会话多设备投递；删除/撤回是**同步事件**（同样走消息管道下发 tombstone）。提一句就够，除非面试官明确要。
+每设备独立 `device_id` + 独立 read receipts/已送达游标；message 按 session multi-device delivery；删除/撤回是**sync event**（同样走 message pipeline push-down tombstone）。提一句就够，除非 interviewer 明确要。
 
-## 7. 红牌答案
+## 7. Red Flags
 
-- 用 HTTP 短轮询做核心消息通道且讲不出代价
-- 消息存 MySQL 单表、没有分片故事（2B/day 写入）
-- 没有去重/顺序讨论（被问"网络重试重发怎么办"当场卡住）
-- 在线状态全员广播（没算过 QPS）
-- 已读功能没有游标设计（每次全量比对？）
+- 用 HTTP 短 polling 做 core message 通道且讲不出 cost
+- message 存 MySQL 单表、没有 sharding 故事（2B/day write 入）
+- 没有 dedup/ordering 讨论（被问"network retry 重发怎么办"当场卡住）
+- online presence 全员广播（没算过 QPS）
+- read receipts feature 没有游标设计（每次全量比对？）
 
-## 8. 一分钟电梯版
+## 8. One-Minute Elevator Pitch
 
-"连接层 WebSocket 网关集群（10M 并发连接，50–100 台），路由表外置 Redis 实现连接层无状态化；消息走 API → Kafka 按 conversation 分区 → Cassandra 按会话分区，分区键+TIMEUUID 聚簇天然实现会话内保序。投递语义：客户端 message UUID 幂等去重 + 接收端按 ID 重排 + at-least-once 管道 = 事实 exactly-once；离线走推送服务 + 上线按游标增量拉。在线状态心跳 + TTL、按会话订阅、容忍 30 秒 stale。群聊按规模分界：小群写扩散、大群读扩散。媒体消息走独立的对象存储 + CDN 管道，不占聊天链路。"
+"connection layer WebSocket gateway cluster（10M concurrency connection，50–100 台），routing 表外置 Redis 实现 connection layer stateless 化；message 走 API → Kafka 按 conversation partition → Cassandra 按 session partition，partition key+TIMEUUID clustering 天然实现 session 内保序。delivery semantics：client message UUID idempotent dedup + 接收端按 ID 重排 + at-least-once pipeline = 事实 exactly-once；offline 走 push service + 上线按游标增量拉。online presence heartbeat + TTL、按 session subscription、容忍 30 秒 stale。group chat 按 scale 分界：小群 write fan-out、大群 read fan-out。媒体 message 走独立的 object storage + CDN pipeline，不占聊天链路。"
 
 ---
 ← [Q3 Top-K](03-top-k-heavy-hitters.md) ｜ [Q5 News Feed →](05-news-feed.md)

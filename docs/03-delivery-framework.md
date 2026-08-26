@@ -1,130 +1,130 @@
-# 03 · 表达框架：45 分钟怎么走
+# 03 · Delivery Framework: Running the 45 Minutes
 
-> 各家框架（Hello Interview、Design Gurus、Alex Xu 4 步法）本质是同一副骨架。本章统一成一条 6 阶段时间线，并给出每阶段的话术模板——模板的作用不是背诵，是让你在高压下不用重新发明结构。
+> 各家 framework（Hello Interview、Design Gurus、Alex Xu 4-step method）本质是同一副 skeleton。本章统一成一条 6 阶段 timeline，并给出每阶段的 script templates——template 的作用不是背诵，是让你在高压下不用重新发明 structure。
 
-## 0. 为什么需要框架
+## 0. 为什么需要 framework
 
-没有框架的面试最典型死法：**时间黑洞**。在某一个环节（通常是画图或深挖）待了 25 分钟，然后被面试官强行拖走，后面全是赶路，没有一处深挖。框架的本质是**时间预算表**——每一阶段超时你都要有知觉。
+没有 framework 的面试最典型死法：**time sink**。在某一个环节（通常是画图或 deep dive）待了 25 分钟，然后被 interviewer 强行拖走，后面全是赶路，没有一处 deep dive。framework 的本质是**time budget**——每一阶段 timeout 你都要有知觉。
 
-## 1. 六阶段总览
+## 1. six-phase overview
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ Phase 1  需求澄清      5 min   问题清单 + 规模估算            │
-│ Phase 2  核心功能确认  3 min   3–5 个功能点 + 明确不做的东西   │
-│ Phase 3  高层设计     10 min   组件图 + 数据流 + API 骨架     │
-│ Phase 4  数据模型      5 min   存储选型 + 表/KV 结构 + 分片    │
-│ Phase 5  深挖         17 min   2–3 个子系统（和面试官协商）    │
-│ Phase 6  收尾         5 min   瓶颈 / 监控 / 运维 / 未覆盖      │
+│ Phase 1 requirements clarification 5 min 问题 checklist + scale estimation │
+│ Phase 2 core feature confirmation 3 min 3–5 个 features + 明确不做的东西 │
+│ Phase 3 high-level design 10 min component diagram + data flow + API skeleton │
+│ Phase 4 data model 5 min storage selection + 表/KV structure + sharding │
+│ Phase 5 deep dive 17 min 2–3 个 subsystem（和 interviewer negotiate） │
+│ Phase 6 wrap-up 5 min bottleneck / monitoring / operations / out-of-scope items │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-> 注意：Phase 3+4 合起来就是经典的「概要设计」；Alex Xu 的 4 步法把 1+2 合并为「理解需求」。结构可以微调，**时间纪律不能破**。
+> 注意：Phase 3+4 合起来就是经典的「high-level design」；Alex Xu 的 4-step method 把 1+2 merge 为「理解需求」。structure 可以微调，**时间纪律不能破**。
 
-## 2. Phase 1 · 需求澄清（5 分钟）
+## 2. Phase 1 · requirements clarification（5 分钟）
 
-### 必问清单（背下来，每场都过一遍）
+### must-ask checklist（背下来，每场都过一遍）
 
-**规模类**
-- DAU / MAU 多少？——决定后面所有容量数字
-- 读多还是写多？读写比？——决定存储和缓存策略
-- 峰值系数多少（日常 QPS × 3~5）？
+**scale 类**
+- DAU / MAU 多少？——决定后面所有 capacity numbers
+- read-heavy 还是 write-heavy？read/write ratio？——决定 storage 和 cache 策略
+- peak multiplier 多少（日常 QPS × 3~5）？
 
-**功能边界类**
-- 核心用户流程是什么？（让面试官描述一个用户故事）
-- 有哪些客户端？（Web / iOS / Android / 第三方 API）
-- 要不要支持离线 / 弱网？
+**feature boundaries 类**
+- core user flow 是什么？（让 interviewer 描述一个 user story）
+- 有哪些 client？（Web / iOS / Android / third-party API）
+- 要不要支持 offline / flaky network？
 
-**非功能需求类（主动提，加分项）**
-- 延迟预算：P99 读 200ms 这种量级可接受吗？
-- 一致性：最终一致（秒级延迟 OK）还是要读己之写？
-- 可用性目标：几个 9？允许降级吗？
-- 数据可以丢吗？丢多少？（日志类 vs 计费类天壤之别）
+**non-functional requirements 类（主动提，bonus signal）**
+- latency budget：P99 read 200ms 这种 order of magnitude acceptable 吗？
+- consistency：eventually consistent（second-level latency OK）还是要 read-your-writes？
+- availability target：几个 9？allow degraded mode 吗？
+- data 可以丢吗？丢多少？（log 类 vs billing 类天壤之别）
 
-### 话术模板
+### script templates
 
-> "让我先花几分钟对齐需求。我先问几个规模和边界的问题，然后我会做一轮估算，你看数字方向对不对。"
+> "让我先花几分钟对齐需求。我先问几个 scale 和 boundary 的问题，然后我会做一轮 estimation，你看 numbers 方向对不对。"
 
-> "这个题目没说读写比，我假设 100:1——如果接近 1:1，我后面存储选型会完全不同，所以想先跟你确认。"
+> "这个题目没说 read/write ratio，我假设 100:1——如果接近 1:1，我后面 storage selection 会完全不同，所以想先跟你确认。"
 
-**关键动作**：把面试官的回答**写到白板上**。这不是形式——后面每个设计决策你都要回头指它。
+**关键动作**：把 interviewer 的回答**write 到 whiteboard 上**。这不是形式——后面每个设计决策你都要回头指它。
 
-## 3. Phase 2 · 核心功能确认（3 分钟）
+## 3. Phase 2 · core feature confirmation（3 分钟）
 
-从需求里**收敛出 3–5 个功能点**，并明确说什么不做：
+从需求里**distill 3–5 个 features**，并明确说什么不做：
 
-> "基于刚才的需求，我打算聚焦这四个功能：①…②…③…④…。多区域容灾和第三方开放 API 我先不展开，放到最后的 trade-off 里聊，可以吗？"
+> "基于刚才的需求，我打算聚焦这四个 feature：①…②…③…④…。multi-region DR 和 third-party 开放 API 我先不展开，放到最后的 trade-off 里聊，可以吗？"
 
-这一步是 E5 信号最密集的 30 秒：**收敛 = 你知道什么重要**。面试官几乎总会说 yes，而这句话已经把「over-engineering」的风险提前拆掉了。
+这一步是 E5 signal 最密集的 30 秒：**convergence = 你知道什么重要**。interviewer 几乎总会说 yes，而这句话已经把「over-engineering」的 risk 提前拆掉了。
 
-## 4. Phase 3 · 高层设计（10 分钟）
+## 4. Phase 3 · high-level design（10 分钟）
 
-画一张组件图，包含：客户端 → 网关/LB → 无状态服务层 → 缓存 → 存储 →（异步）队列 → 下游消费者。
+画一张 component diagram，包含：client → gateway/LB → stateless service tier → cache → storage →（async）queue → downstream consumer。
 
 三条纪律：
-1. **边画边讲**，每个框只讲一句话的职责——细节留给深挖阶段
-2. **数据流用编号箭头**：走一遍「用户发一个请求，12345 经过哪些组件」
-3. **每 2–3 分钟对齐一次**："这个高层结构 OK 吗？OK 的话我进入数据模型。"——防止你在错误的方向上狂奔 10 分钟
+1. **draw-as-you-talk**，每个框只讲一句话的职责——细节留给 deep-dive phase
+2. **data flow 用编号箭头**：走一遍「user 发一个 request，12345 经过哪些组件」
+3. **每 2–3 分钟对齐一次**："这个高层 structure OK 吗？OK 的话我进入 data model。"——防止你在错误的方向上狂奔 10 分钟
 
-API 骨架（可选，30 秒过）：只列 endpoint 名 + 动词，不写参数细节，除非面的是 Product Architecture 轮（见 08 章）。
+API skeleton（可选，30 秒过）：只列 endpoint 名 + 动词，不 write parameter 细节，除非面的是 Product Architecture 轮（见 08 章）。
 
-## 5. Phase 4 · 数据模型（5 分钟）
+## 5. Phase 4 · data model（5 分钟）
 
-- 选存储：SQL / NoSQL / KV / 时序 / 搜索引擎——**必须带理由**（见 05 章选型表）
-- 画表结构或 KV 结构：主键、分区键、二级索引
-- 主动说分片键选择和热点风险："我用 user_id 做分区键，大 V 的分区会倾斜，深挖阶段我讲怎么处理"
+- 选 storage：SQL / NoSQL / KV / time-series / search engine——**必须带理由**（见 05 章 selection 表）
+- 画 table schema 或 KV structure：primary key、partition key、secondary index
+- 主动说 shard key 选择和 hot spot risk："我用 user_id 做 partition key，celebrity user 的 partition 会 skew，deep-dive phase 我讲怎么处理"
 
-## 6. Phase 5 · 深挖（17 分钟）——E5 的主战场
+## 6. Phase 5 · deep dive（17 分钟）——E5 的主战场
 
-### 怎么选深挖点
+### 怎么选 deep-dive spots
 
-> "现在有三处值得深入：A（fan-out 的写放大）、B（存储的扩展路径）、C（一致性窗口）。我自己最想聊 A，因为它是最可能先挂的地方。你想看哪个？"
+> "现在有三处值得深入：A（fan-out 的 write amplification）、B（storage 的 scaling path）、C（consistency window）。我自己最想聊 A，因为它是最可能先挂的地方。你想看哪个？"
 
-这句话同时拿到三个高分信号：主动性、风险嗅觉、协作。面试官通常会选 A，或指出他关心的那个——**他说什么就挖什么**，他选的方向往往是他在打分的方向。
+这句话同时拿到三个高分 signal：主动性、risk 嗅觉、协作。interviewer 通常会选 A，或指出他关心的那个——**他说什么就挖什么**，他选的方向往往是他在打分的方向。
 
-### 深挖的「钻三层」法
+### deep dive 的「drill-three-levels」法
 
-每钻一层回答：**是什么 → 为什么 → 坏了怎么办**
+每钻一层回答：**是什么 → 为什么 → what if it breaks**
 
 ```
-第一层：方案（"消息投递用长轮询"）
-第二层：为什么（"对比 WebSocket：不需要双向低延迟，长轮询运维简单、兼容性好"）
-第三层：故障（"连接数打满怎么办？→ 连接网关分区 + 心跳剔除 + 降级到轮询"）
+第一层：approach（"message delivery 用 long polling"）
+第二层：为什么（"comparison WebSocket：不需要双向低 latency，long polling operations 简单、兼容性好"）
+第三层：failure（"connection saturation 怎么办？→ connection gateway partition + heartbeat exclude + fall back to polling"）
 ```
 
-### 被追问到知识盲区时
+### 被追问到知识 blind spot 时
 
 > "这块我没实际操作过。基于 X 和 Y 的原理，我的推理是 Z；但我没有把握，如果不对你可以纠正我。"
 
-诚实 + 推理 > 硬编。E5 面试官阅人无数，编造 100% 被识破。
+诚实 + 推理 > 硬编。E5 interviewer 阅人无数，编造 100% 被识破。
 
-## 7. Phase 6 · 收尾（5 分钟）
+## 7. Phase 6 · wrap-up（5 分钟）
 
 留出最后 5 分钟（提前看表），主动覆盖：
 
-- **单点**：图里哪个框挂了最伤？→ 冗余方案
-- **瓶颈**：流量 ×10 先死哪里？（通常是 DB 写、fan-out、网络带宽三选一）
-- **监控**：3 个 SLI（延迟 P99 / 错误率 / 积压量）
-- **运维**：怎么部署、怎么灰度、怎么回滚
-- **未覆盖**："地理位置路由和成本优化今天没展开，我认为优先级低于以上这些。"
+- **SPOF**：图里哪个框挂了最伤？→ redundancy approach
+- **bottleneck**：traffic ×10 先死哪里？（通常是 DB write、fan-out、network bandwidth 三选一）
+- **monitoring**：3 个 SLI（latency P99 / error rate / backlog）
+- **operations**：how to deploy、怎么 canary rollout、怎么 rollback
+- **out-of-scope items**："geo-routing 和 cost 优化今天没展开，我认为 priority 低于以上这些。"
 
-以「未覆盖清单」收尾是高级信号：说明你知道自己设计的边界在哪。
+以「out-of-scope items checklist」wrap-up 是高级 signal：说明你知道自己设计的 boundary 在哪。
 
-## 8. 常见流程事故与急救
+## 8. 常见流程 incident 与 rescue
 
-| 事故 | 急救话术 |
+| incident | rescue script |
 |------|---------|
-| 需求澄清 10 分钟还没完 | "差不多了，剩下的我边做边假设，写在这边。" |
-| 面试官中途改需求 | 停笔 → "这影响 A 和 B，C 不受影响。我改这两处，然后继续。" （展示影响分析 = 加分） |
-| 卡壳 30 秒+ | 说出来："我在 A 和 B 之间犹豫，差别是……我倾向 A。" 卡壳沉默才是致命的。 |
-| 时间不够 | "剩下 8 分钟，我想优先把 X 讲完，Y 和 Z 我一句话带过。" 面试官爱死这种时间感。 |
+| requirements clarification 10 分钟还没完 | "差不多了，剩下的我边做边假设，write 在这边。" |
+| interviewer 中途改需求 | 停笔 → "这影响 A 和 B，C 不受影响。我改这两处，然后继续。" （impression 影响分析 = 加分） |
+| freezing up 30 秒+ | 说出来："我在 A 和 B 之间犹豫，差别是……我倾向 A。" freezing up 沉默才是 fatal 的。 |
+| 时间不够 | "剩下 8 分钟，我想优先把 X 讲完，Y 和 Z 我一句话带过。" interviewer 爱死这种时间感。 |
 
-## 9. 练习方法
+## 9. practice method
 
-1. **模板内化**：拿着话术模板做 3 道题，之后扔掉模板
-2. **录像复盘**：手机录屏自己走全流程，重点看——有没有沉默 >10 秒、每个阶段实际用时、面试官视角能不能跟上
-3. **真人 mock**：把框架练熟之后再上 [Interviewing.io](https://interviewing.io) 或朋友面，别浪费真人 mock 在练框架上
+1. **template internalize**：拿着 script templates 做 3 道题，之后扔掉 template
+2. **recording retrospective**：手机录屏自己走全流程，重点看——有没有沉默 >10 秒、每个阶段实际用时、interviewer 视角能不能跟上
+3. **live mock**：把 framework 练熟之后再上 [Interviewing.io](https://interviewing.io) 或朋友面，别浪费 live mock 在练 framework 上
 
-## 下一章
+## Next Module
 
-→ [04 · 估算与必备数字](04-estimation-numbers.md)
+→ [04 · Estimation & Numbers to Know](04-estimation-numbers.md)
