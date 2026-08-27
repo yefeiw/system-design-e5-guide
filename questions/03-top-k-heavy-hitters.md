@@ -3,11 +3,11 @@
 > Difficulty: Medium ｜ archetype：write-heavy + peak shaving（streaming algorithm）
 > E5 high-frequency problems。考的是**accuracy vs memory vs latency**的三角 trade-off，一道题覆盖整个流处理世界观。
 
-## 1. 题目描述
+## 1. Problem Statement
 
 "设计一个 system，real-time 统计我们 service 中访问量最高的 10 个 URL / 被播放最多的歌曲 / 最热门的标签，比如按小时和按天两个粒度。"
 
-## 2. 澄清问题
+## 2. Clarifying Questions
 
 | 问题 | intent |
 |------|------|
@@ -17,7 +17,7 @@
 | 全量所有时间 vs 滚动 window？ | 决定要不要 window aggregation |
 | traffic 多大？（1B events/day order of magnitude?）| memory 可行性计算 |
 
-## 3. 估算推演
+## 3. Estimation Walkthrough
 
 ```
 1B events/day ≈ 12K events/s average，peak ×5 ≈ 60K/s
@@ -28,7 +28,7 @@ takeaway → 先问清楚：如果 cardinality 可控，exact approach memory �
 
 **这步是 E5 关键**：很多人背了 Count-Min Sketch 就无脑上，但 100M cardinality exact hash table 也就 2GB，single machine 都放得下。**先算，再选 algorithm**。
 
-## 4. 高层设计
+## 4. High-Level Design
 
 ```
 event 源 ──▶ Kafka（按 item_id partition，保证同 key 聚到同一 partition）
@@ -45,13 +45,13 @@ event 源 ──▶ Kafka（按 item_id partition，保证同 key 聚到同一 p
 
 能讲出上面括号里那个论证，就是这道题的 E5 时刻。
 
-## 5. 数据模型
+## 5. Data Model
 
 - partition 内：`HashMap<item_id, count>` + min-heap（size K，O(n log K)）
 - window data：minute-level local aggregation 落 Redis / 按小时 partition 落 Parquet
 - service tier：`(window, rank) → (item, count)`，短 TTL
 
-## 6. 深入分析
+## 6. Deep Dives
 
 ### Deep Dive A · memory 不够怎么办：approximate algorithm 家族
 
@@ -84,7 +84,7 @@ E5 表达："approximate algorithm 在重击者（heavy hitter）上的相对 er
 - Top-K query QPS 高 → 预计算 + Redis cache，refresh 频率 = business"real-time"requirement
 - 多 dimension Top-K（按国家×按品类）→ dimension combination 爆炸，只预计算 high-frequency combination，long tail 走 on-the-fly aggregation
 
-## 7. 常见失分点
+## 7. Red Flags
 
 - 上来就 Count-Min Sketch（没先算 exact approach 的 memory 可行性）
 - 把全量 event 塞进一个 global heap（没有 partition local Top-K 的洞察）
@@ -92,7 +92,7 @@ E5 表达："approximate algorithm 在重击者（heavy hitter）上的相对 er
 - 讲不出 local Top-K merge 的 correctness 论证
 - data 丢了就丢了，没 delivery semantics awareness
 
-## 8. 一分钟总结
+## 8. One-Minute Elevator Pitch
 
 "event 进 Kafka 按 item partition，每 partition 流式维护 counter hash + min-heap，local Top-K merge 出 global——merge 的 correctness 来自 global 第 K 名必然是其最强 partition 的 local 前 K。cardinality 一亿内 exact hash 才 2GB，我先算再决定要不要 approximate；cardinality 到十亿级换 Count-Min Sketch（error margin one-way 且集中在 long tail，恰好不伤 Top-K），nightly batch processing 做 exact fallback，这就是 lambda。window semantics、late data watermark、at-least-once replay 的重复 counter——统计 business acceptable，billing business 必须换 exactly-once，cost 是 throughput 减半。"
 

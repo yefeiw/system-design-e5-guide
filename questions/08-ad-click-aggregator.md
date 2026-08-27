@@ -3,11 +3,11 @@
 > Difficulty: Medium–Hard ｜ archetype：write-heavy + peak shaving + billing accuracy
 > Hello Interview flagged **E5 high-frequency problems**，覆盖流处理全家 bucket：dedup、window、exactly-once、lambda/kappa。和 Q3 Top-K 是姊妹题但多了「钱」的 dimension。
 
-## 1. 题目描述
+## 1. Problem Statement
 
 "设计一个 ad data pipeline：收集 ad impression（impression）和 click（click）event，aggregation 出每个 ad 的 CTR（CTR）、按 dimension 出 reports，并给 billing system 提供准确的 click bill。"
 
-## 2. 澄清问题
+## 2. Clarifying Questions
 
 | 问题 | intent |
 |------|------|
@@ -17,7 +17,7 @@
 | reports dimension 有哪些（advertiser×时间×地域）？| dimensional modeling |
 | real-time anti-fraud 要不要？ | scope control |
 
-## 3. 估算推演
+## 3. Estimation Walkthrough
 
 ```
 1B impressions/day ≈ 12K/s average，peak 60K/s；CTR 1% → 10M clicks/day
@@ -27,7 +27,7 @@ takeaway → 两个 storage 世界：raw event 进湖（immutable、可 recomput
        aggregation results 进 service storage（低 latency query）。architecture 必然是 streaming + batch layering
 ```
 
-## 4. 高层设计
+## 4. High-Level Design
 
 ```
 SDK/frontend ──▶ event ingestion API（校验、tagging）──▶ Kafka（impressions / clicks 各自 topic）
@@ -50,7 +50,7 @@ SDK/frontend ──▶ event ingestion API（校验、tagging）──▶ Kafka�
 
 **叙事主线**："real-time layer 给 ops 看（minute-level、approximate、可 recompute），batch layer 给钱（小时/day-level、exact、audit）——**同一份 data 两条 timeline**，这是 lambda 的教科书 scenario。"
 
-## 5. 数据模型
+## 5. Data Model
 
 ```
 event（immutable，JSON→Parquet into the data lake）:
@@ -64,7 +64,7 @@ dedup state（streaming layer，RocksDB/Flink state）: click_id → TTL window
 
 **关键点**：click 里带 `imp_id` foreign key——"关联不是靠 event time 相近去猜，是靠 ID foreign key exact 关联；**event ordering 不可信，ID 关系才可信**。"
 
-## 6. 深入分析
+## 6. Deep Dives
 
 ### Deep Dive A · Click 和 Impression 的 out-of-order correlation（本题的 E5 拷问点）
 
@@ -93,7 +93,7 @@ dedup state（streaming layer，RocksDB/Flink state）: click_id → TTL window
 - Kafka 做缓冲，consumer 按能力 pull；**backpressure 传导**到采集端 return 503+Retry-After 让 SDK backoff
 - "丢什么的 priority 是产品决策不是技术决策——我会把三类 event 的 SLA write 成表让 business 签字。"
 
-## 7. 常见失分点
+## 7. Red Flags
 
 - 只有 real-time layer 没有 batch layer（billing 不能靠可能重复/丢失的流）
 - click 和 impression 靠 timestamp nearest matching
@@ -101,7 +101,7 @@ dedup state（streaming layer，RocksDB/Flink state）: click_id → TTL window
 - aggregation results 直接 write MySQL 供 reports（dimensional aggregation query 会 overwhelm OLTP）
 - 没有 late data/watermark 概念
 
-## 8. 一分钟总结
+## 8. One-Minute Elevator Pitch
 
 "两层 data flow：Kafka 承接 raw event（impression/click 双 topic，click 带 imp_id foreign key exact 关联而非时间猜 matching）；real-time layer Flink 做 dedup（click_id idempotent + user frequency rule）、watermark out-of-order join、minute-level pre-aggregation 进 memory OLAP 给 ops 看；batch layer 夜间全量 recompute 落 ClickHouse，**billing 以 batch layer 为准**。raw event 全量 into the data lake 保证可 replay——streaming layer 挂了从湖 re-run。traffic surge 时按 event tiered dropping（billing events 永不丢）。real-time 和最终 numbers 永远有差，reports annotate counting semantics，这就是 lambda 的 cost 与 benefit。"
 

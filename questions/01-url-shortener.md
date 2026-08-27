@@ -3,11 +3,11 @@
 > Difficulty: Easy ｜ archetype：read-heavy + cache
 > 看似简单，其实是**把「ID generate」「cache」「redirect 链路」三个 deep-dive spots 打穿**的最佳练手题。
 
-## 1. 题目描述
+## 1. Problem Statement
 
 "设计一个类似 bit.ly 的 URL shortener。user 提交长 URL，得到一个 short URL 接，访问 short URL 接跳转到原 URL。"
 
-## 2. 澄清问题
+## 2. Clarifying Questions
 
 | 问题 | 为什么问 |
 |------|---------|
@@ -19,7 +19,7 @@
 
 **scope convergence script**："我聚焦创建/read 取/redirect 三个 core feature + click counter；自 definitions 域名和过期管理放到 follow-up。"
 
-## 3. 估算推演（假设 100M DAU，per-user 5 read 0.1 write）
+## 3. Estimation Walkthrough（假设 100M DAU，per-user 5 read 0.1 write）
 
 ```
 read QPS ≈ 5,800（peak ~17K） write QPS ≈ 115
@@ -28,7 +28,7 @@ bandwidth ≈ 17K × 1KB ≈ 17MB/s（轻）
 takeaway → read path 必须 cache；write 和 storage 毫无压力 → 单 write-heavy read 教科书 scenario
 ```
 
-## 4. 高层设计
+## 4. High-Level Design
 
 ```
 client ──POST /url──▶ LB ──▶ URL shortener（stateless）──▶ ID generate 器
@@ -44,7 +44,7 @@ client ──GET /abc123──▶ LB ──▶ URL shortener ──▶ Redis cac
 
 data flow 口述版："创建走 service tier 拿唯一 ID、编码成短码、write 主库；访问走 cache 优先，miss 回源并回填。"
 
-## 5. 数据模型
+## 5. Data Model
 
 ```sql
 -- MySQL 即可（strongly consistent + transaction + 单表 index 简单）
@@ -59,7 +59,7 @@ INDEX (created_by), INDEX (expires_at)
 
 **为什么 SQL 不是 DynamoDB**："write 只有百级 QPS，关系型毫无压力，且过期 cleanup、按 user query 都要灵活 index——引入 KV 反而丢失这些。scale 撑死 single database + read write 分离。"
 
-## 6. 深入分析
+## 6. Deep Dives
 
 ### Deep Dive A · ID 怎么 generate（本题经典）
 
@@ -88,14 +88,14 @@ E5 standard answers："write QPS 才 115，我选 DB auto-increment + 号段 cac
 
 "热门 short URL（病毒传播）单 key 会被打到单个 Redis sharding → local cache（in-process LRU）做第一层 + logical expiration 防 stampede。"
 
-## 7. 常见失分点
+## 7. Red Flags
 
 - 上来就"sharding 128 个库"（write 115 QPS 分什么）
 - 用 hash + 不谈碰撞处理
 - 只说"加 Redis"，不谈 hit rate/invalidation 策略/hot spot
 - 301/302 的统计问题没 awareness（被 interviewer 点破后才反应）
 
-## 8. 一分钟总结
+## 8. One-Minute Elevator Pitch
 
 "read/write ratio 1000:1，write 走 DB auto-increment + base62 编码天然无碰撞；read 走 Redis cache-aside + in-process 二级 cache 扛 hot spot；301 vs 302 取决于要不要 click 统计——要统计就得 302 回源，那就把 cache hit rate 做成 core SLI。click log async 进 Kafka 做分析。storage order of magnitude 2TB/年，single database 主从足够，不为这个 scale 引入任何 distributed 组件。"
 

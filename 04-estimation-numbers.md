@@ -1,6 +1,6 @@
-# 04 · 估算与必备数字（数量级推算）
+# 04 · Estimation & Numbers to Know (Back-of-Envelope)
 
-> 估算的目的不是得出精确数字，而是**用数量级框定设计空间**。在 E5 面试中，一句“按 1 亿 DAU、读写比 100:1、读请求峰值约 10 万 QPS，单个 MySQL 实例无法承受，因此需要分片”，胜过十句泛泛而谈的形容词。
+> estimation 的作用不是算准，是**用 numbers 框定设计空间**。E5 面试里一句「按 100M DAU、read/write ratio 100:1，read QPS peak 约 100K，single database MySQL 扛不住，所以这里必须 sharding」值 10 句形容词。
 
 ## 1. Numbers to Know（先背这张表）
 
@@ -102,6 +102,6 @@ takeaway → read 需要 cache（17K QPS single database + 每次回源扛不住
 
 答案自己算，重点是把「numbers → 设计 takeaway」的最后一句话练 cost 能。
 
-## 下一章
+## Next Module
 
 → [05 · Building Blocks](05-building-blocks.md)

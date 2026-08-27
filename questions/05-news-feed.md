@@ -3,11 +3,11 @@
 > Difficulty: Medium ｜ archetype：Fan-out write amplification + read-heavy
 > Meta 系最爱。**Push vs Pull 的混合 approach**是主轴，consistency 细节是 E5 区分度。
 
-## 1. 题目描述
+## 1. Problem Statement
 
 "设计 Facebook/Twitter 的 News Feed：user posting、follow 别人、刷到自己 follow 者的 timeline Feed。"
 
-## 2. 澄清问题
+## 2. Clarifying Questions
 
 | 问题 | intent |
 |------|------|
@@ -17,7 +17,7 @@
 | 新 Feed 的 refresh semantics？ | read-your-writes / eventually consistent 的选择题 |
 | 要不要支持"推文浏览数"这类轻互动？ | write 入 storm variant |
 
-## 3. 估算推演
+## 3. Estimation Walkthrough
 
 ```
 100M DAU；per-user follow 300 人、日发 2 帖、刷 20 次
@@ -27,7 +27,7 @@ write fan-out cost：一篇帖 × follow 者 average 300 = average 600K feed-ite
 takeaway → write fan-out 的 write QPS 是 posting QPS 的 ~300 倍，这就是本题全部矛盾的来源
 ```
 
-## 4. 高层设计
+## 4. High-Level Design
 
 ```
 posting：client ──▶ Post API ──▶ 帖子 service ──▶ 帖子库（Post Store, Cassandra/sharding）
@@ -47,7 +47,7 @@ posting：client ──▶ Post API ──▶ 帖子 service ──▶ 帖子库
                        └──▶ Feed 现场组装（pull）：查 follow 列表 → 批量拉对方近期帖子 → 归并
 ```
 
-## 5. 数据模型
+## 5. Data Model
 
 ```
 posts (post_id PK, user_id, content, media_refs, created_at) -- sharding：post_id
@@ -57,7 +57,7 @@ feed_cache: Redis List per user（存 post_id，长度封顶如 800）
 inbox (user_id, last_read_post_id) -- 游标
 ```
 
-## 6. 深入分析
+## 6. Deep Dives
 
 ### Deep Dive A · Push vs Pull vs 混合（主菜）
 
@@ -98,7 +98,7 @@ Push model 的隐藏债务：**删帖要从所有 followers 的 cache 里抠掉*
 
 "真实产品是 algorithm ranking（互动预测分），那会把 feed 组装变成**candidates 检索 + 打分**两段式（recall 几百条 → 轻量 model 打分取几十条），architecture 主体不变，加一个 ranking service。今天我先做时间轴。"
 
-## 7. 常见失分点
+## 7. Red Flags
 
 - 纯 push 且没讨论 celebrity user write amplification
 - 纯 pull 且没算 300 人 on-the-fly aggregation 的 read latency
@@ -106,7 +106,7 @@ Push model 的隐藏债务：**删帖要从所有 followers 的 cache 里抠掉*
 - read-your-own-writes 没 awareness（被 interviewer 问"你自己发的刷不到"才反应）
 - pagination 用纯 offset
 
-## 8. 一分钟总结
+## 8. One-Minute Elevator Pitch
 
 "read 是 write 的 20 倍，core 矛盾是 fan-out write amplification。混合 approach：普通 user push——帖子经 Kafka 进 fanout worker write 进各 followers 的 Redis feed cache（存 post_id 不存内容，删帖走 tombstone 惰性过滤）；celebrity user 不扩散，read 时现场 pull 归并，阈值按 fanout 消费 latency 调。consistency tiered：对外人 eventually consistent，对作者本人 read-your-own-writes sync 拼入。pagination 用 post_id 锚定的 cursor。algorithm ranking 是把 assembly layer 换成 recall+打分两段式，architecture skeleton 不变。"
 

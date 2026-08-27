@@ -1,8 +1,8 @@
-# 10 · 六周学习计划
+# 10 · 6-Week Study Plan
 
-> 计划按常见的 E5 准备周期设计：4–6 周、每天 1–2 小时。核心原则是：**至少一半时间用于输出——做题、模拟面试和复盘；输入只占约三成。** 可以压缩到四周，但不建议再短。
+> 按社区 consensus 的 E5 prep 周期（4–6 周，每天 1–2 小时）排布。core 原则：**50% 时间在输出（做题/mock/retrospective），输入只占 30%**。可以压缩到 4 周（每周强度 ×1.5），不建议低于 4 周。
 
-## 总览
+## overview
 
 ```
 周 1 认知与 framework rubric internalize + framework 练到肌肉记忆 + numbers 表
@@ -71,7 +71,7 @@
 
 砍法：第 2 周并入第 1 周（building blocks 只看 05 章文字版，跳过 videos）；Q6 和 Q8 二选一；mock 从 3 次减到 2 次（**mock 不能再减**，它是 prep 的最大杠杆）。
 
-## 模拟面试记录模板
+## Mock Log template
 
 ```markdown
 ## Mock #N — 日期 / 平台 / 题目
@@ -84,7 +84,7 @@
 - 下次要改的一件事（只选一件）：
 ```
 
-## 在职准备的每日节奏
+## 每日节奏建议（在职版）
 
 ```
 通勤 20 min：口算 practice / YouTube building blocks videos / 案例笔记

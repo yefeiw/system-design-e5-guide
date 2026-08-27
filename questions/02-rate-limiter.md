@@ -3,11 +3,11 @@
 > Difficulty: Easy–Medium ｜ archetype：algorithmic deep dives + distributed consistency
 > 题目小，但**algorithm 层四档 comparison + distributed clock 问题**能一路问到 E5 的知识底。
 
-## 1. 题目描述
+## 1. Problem Statement
 
 "设计一个 API rate limiter，防止 abuse。要支持每 user 每秒/每分钟 N 个 request。"
 
-## 2. 澄清问题
+## 2. Clarifying Questions
 
 | 问题 | intent |
 |------|------|
@@ -17,11 +17,11 @@
 | rule 要动态 push-down 吗？ | 引入 config center |
 | rate limiting 的 semantics：average rate vs burst capacity | 直接指向 algorithm 选择 |
 
-## 3. 估算（简短，本题不在 numbers 上纠缠）
+## 3. estimation（简短，本题不在 numbers 上纠缠）
 
 "假设 100K QPS peak、2000 万活跃 key——rate limiting 判断本身必须 <1ms P99 且不成为新 bottleneck，所以它必须是**memory 级操作**，这是本题第一设计约束。"
 
-## 4. 高层设计
+## 4. High-Level Design
 
 ```
                         ┌────────────────────────────┐
@@ -34,12 +34,12 @@ rate-limited request ──▶ 429 + Retry-After ──▶ （可选）Kafka rec
 
 **关键 architecture 决策**："rate limiting 在**gateway/middleware in-process 做**，Redis 只做跨 instance 的 counter convergence（async/quasi-sync）。每 request 一次 Redis sync call 会把 rate limiter 自己变成 20 万 QPS 的 Redis cluster——得不偿失。"
 
-## 5. 数据模型
+## 5. Data Model
 
 Redis：`rate:{user_id}:{window_start}` → counter / token bucket state（Lua 脚本 atomic read-modify-write）。
 rule 中心：`rule_id → {key_template, algorithm, limit, window, burst}`。
 
-## 6. 深入分析
+## 6. Deep Dives
 
 ### Deep Dive A · 四种 algorithm（must-know，背成 comparison 表）
 
@@ -76,14 +76,14 @@ E5 表达："default 答案 token bucket——因为它把『average rate』和�
 - tiered rate limiting：gateway tier coarse-grained（IP）+ service tier fine-grained（user+endpoint）
 - rate-limited event 进 Kafka → attack detection / rule tuning
 
-## 7. 常见失分点
+## 7. Red Flags
 
 - 只会"fixed window counter + Redis INCR"一档，说不出 boundary burst 问题
 - 把 Redis sync call 放 critical path 却不讨论它挂掉的 scenario
 - 不知道 token bucket 的 burst 与 rate 是两个 parameter
 - 没有 degradation approach（rate limiter 自己把全站打挂 = 设计 incident）
 
-## 8. 一分钟总结
+## 8. One-Minute Elevator Pitch
 
 "in-process token bucket 做判断（r 控 average、b 控 burst），Redis 做跨 instance counter convergence——sync mode exact 但把 Redis 放进 critical path，我 default async reconciliation + degrade to standalone rate limiting，接受 10% over-limit 换 availability，anti-abuse scenario 这个 trade-off 成立。rule 从 config center push-down 支持 hot reload，rate-limited request 带 Retry-After return，event 进 Kafka 做分析。如果 downstream 是 billing 类必须 exact，我会换 sync + Redis cluster 并把 cost 讲清楚。"
 

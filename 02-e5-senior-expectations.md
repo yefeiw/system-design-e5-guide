@@ -1,8 +1,8 @@
-# 02 · E5 / Senior 的面试预期
+# 02 · E5 / Senior Expectations
 
-> 同一道题，E4 与 E5 的过线答案并不相同。本章说明两者的关键差异，以及对应的训练方法。
+> 同一道题，E4 和 E5 的「过线答案」完全不同。本章讲清楚差在哪，以及每个 dimension 怎么练。
 
-## 1. E5 与 E4：五个本质差异
+## 1. E5 vs E4：五个本质区别
 
 ### 1.1 driving the conversation：谁在开车
 
@@ -72,7 +72,7 @@ E4 把模糊当阻碍（「题目没说清楚」），E5 把模糊当杠杆：
 - deep dive 时答「这个没研究过」超过 2 次
 - over-engineering：日活百万的 system 讨论了跨区域多活
 
-## 3. 各评分维度如何训练
+## 3. 每个 dimension 怎么练
 
 | dimension | practice method | 自检标准 |
 |------|---------|---------|
@@ -82,7 +82,7 @@ E4 把模糊当阻碍（「题目没说清楚」），E5 把模糊当杠杆：
 | operations | 对每个设计回答：「半夜 3 点它挂了，monitoring 先报什么？我怎么恢复？」 | 有 SLI checklist |
 | ambiguity | practice「假设驱动」句式，把 20 个常见假设背成 template | 见 03 章 script templates |
 
-## 4. 建议的准备周期
+## 4. timeline consensus
 
 北美社区（Reddit r/ExperiencedDevs、Hello Interview、interviewing.io blogs）对 E5 prep 周期的 consensus：**4–6 周**，每天 1–2 小时，其中：
 
@@ -92,6 +92,6 @@ E4 把模糊当阻碍（「题目没说清楚」），E5 把模糊当杠杆：
 
 详细排期见 [10 · 6-Week Study Plan](10-study-plan.md)。
 
-## 下一章
+## Next Module
 
 → [03 · Delivery Framework: Running the 45 Minutes](03-delivery-framework.md)

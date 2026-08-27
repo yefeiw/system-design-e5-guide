@@ -1,8 +1,8 @@
-# 06 · 经典题总览
+# 06 · Classic Problems Overview
 
-> E5 的准备不需要盲目刷五十道题。**把 8–10 道题练到能深入分析关键子系统，远胜于泛泛地画过三十道题的架构图。**
+> E5 prep 不需要刷 50 道题。**把 8–10 道题打到「能 deep dive 一层」的程度，比刷 30 道「都画过图」强得多。**
 
-## 1. 题目分级（参考 Hello Interview 的难度体系）
+## 1. problem grading（对齐 Hello Interview Difficulty 体系）
 
 ### Easy（必须无瑕疵）
 - URL shortener（[Q1](questions/01-url-shortener.md)）——考 ID generate、cache、redirect
@@ -37,7 +37,7 @@
 
 **practice 后期专门练「archetype 迁移」**：拿到没见过的题，先花 30 秒归类 archetype，直接套用 deep-dive repertoire。
 
-## 3. 每道题的练习流程（顺序不要颠倒）
+## 3. 每道题的 practice workflow（不要反过来！）
 
 ```
 1. cold-solving（45 min，timed、whiteboard、recording） ← 最重要，禁止先看 walkthrough
@@ -71,6 +71,6 @@
 7. **red-flag answers**（哪些答案直接暴露不是 E5）
 8. **one-minute elevator pitch**（mock 前的复习卡）
 
-## 开始练题
+## 进入题目
 
 → [Q1 · URL shortener](questions/01-url-shortener.md)

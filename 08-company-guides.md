@@ -1,6 +1,6 @@
-# 08 · 公司面试风格
+# 08 · Company Style Guide
 
-> 同样达到“通过”的标准，各家公司看重的侧面仍有差异。临考前一周应阅读本章，并将表达重点微调到目标公司的风格。
+> 同一个「过」，每家公司的口味不同。临考前一周把这份 read 了，把你的表达微调成 target 公司的 style。
 
 ## 1. Meta（含 Pirate / Pirate X 辨析）
 
@@ -37,7 +37,7 @@
 - one-way 书面反馈文化：**interviewer 不太和你互动**，别等 hint——你自己推进全程（这和 Meta 的快节奏异曲同工）
 - data 一切：estimation 做扎实，Amazon 明确把 "bar raiser" 标准 write 在公开文档里——depth 不足是 E5 挂法的重灾区
 
-## 4. 其他常见目标公司（速记）
+## 4. 其他常面 target（速记）
 
 | 公司 | style essentials |
 |------|---------|

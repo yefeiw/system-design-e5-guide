@@ -3,11 +3,11 @@
 > Difficulty: Medium ｜ archetype：state sync（long-lived connection）
 > 把「connection layer / message delivery semantics / group chat 扇出」三件事讲清楚，这题就赢了。deep dive 可以无限深，是 impression 功底的好题。
 
-## 1. 题目描述
+## 1. Problem Statement
 
 "设计一个 WhatsApp/微信级别的 chat system：一对一聊天、online presence、message read receipts。"
 
-## 2. 澄清问题
+## 2. Clarifying Questions
 
 | 问题 | intent |
 |------|------|
@@ -18,7 +18,7 @@
 | multi-device sync 要不要？| sync semantics 复杂度翻倍 |
 | 媒体 message（图片/videos）？| 分离媒体 pipeline（本题可先略，提一句）|
 
-## 3. 估算推演
+## 3. Estimation Walkthrough
 
 ```
 50M DAU，per-user 40 条/天 ≈ 2B msg/day ≈ 23K msg/s average
@@ -28,7 +28,7 @@ message 160B（类 WhatsApp）+ 元 data ≈ 500B/条
 storage = 2B × 500B × 2(收发双方) × 1 年 ≈ 700TB/年 → 必须 sharding
 ```
 
-## 4. 高层设计
+## 4. High-Level Design
 
 ```
                           ┌──────────── connection layer（stateless 化）────────────┐
@@ -50,7 +50,7 @@ online presence：heartbeat(minute-level) → state service(Redis TTL) → subsc
 read receipts：client ACK 携带 last_read_msg_id → write 回 → 反向通知对方
 ```
 
-## 5. 数据模型
+## 5. Data Model
 
 ```
 Cassandra（write-heavy read point lookups、按 session clustering、naturally shardable）：
@@ -71,7 +71,7 @@ inbox_state (
 
 **为什么 Cassandra**："按 conversation_id partition → 一个 session 的所有 message 在同一 node → session 内 ordering 由 clustering key 保证，**partition key + clustering key 的设计直接实现'session 内保序'这个 core 需求**，这是 KV wide-column model 和需求天然咬合的案例。"
 
-## 6. 深入分析
+## 6. Deep Dives
 
 ### Deep Dive A · long-lived connection 与 delivery model（must-know）
 
@@ -108,7 +108,7 @@ inbox_state (
 
 每设备独立 `device_id` + 独立 read receipts/已送达游标；message 按 session multi-device delivery；删除/撤回是**sync event**（同样走 message pipeline push-down tombstone）。提一句就够，除非 interviewer 明确要。
 
-## 7. 常见失分点
+## 7. Red Flags
 
 - 用 HTTP 短 polling 做 core message 通道且讲不出 cost
 - message 存 MySQL 单表、没有 sharding 故事（2B/day write 入）
@@ -116,7 +116,7 @@ inbox_state (
 - online presence 全员广播（没算过 QPS）
 - read receipts feature 没有游标设计（每次全量比对？）
 
-## 8. 一分钟总结
+## 8. One-Minute Elevator Pitch
 
 "connection layer WebSocket gateway cluster（10M concurrency connection，50–100 台），routing 表外置 Redis 实现 connection layer stateless 化；message 走 API → Kafka 按 conversation partition → Cassandra 按 session partition，partition key+TIMEUUID clustering 天然实现 session 内保序。delivery semantics：client message UUID idempotent dedup + 接收端按 ID 重排 + at-least-once pipeline = 事实 exactly-once；offline 走 push service + 上线按游标增量拉。online presence heartbeat + TTL、按 session subscription、容忍 30 秒 stale。group chat 按 scale 分界：小群 write fan-out、大群 read fan-out。媒体 message 走独立的 object storage + CDN pipeline，不占聊天链路。"
 

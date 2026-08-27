@@ -1,8 +1,8 @@
-# 01 · 系统设计面试到底考什么
+# 01 · What Is the System Design Interview
 
-> 本章回答三个问题：系统设计面试到底考什么、常见题型有哪些，以及面试官通常如何评分。
+> 本章回答三个问题：这场面试**到底在考什么**、有**哪几种 formats**、interviewer**按什么标准打分**。
 
-## 1. 主流资料如何定义系统设计面试
+## 1. 各家权威 definitions
 
 ### Design Gurus（Grokking 系列出品方）
 
@@ -30,7 +30,7 @@
 
 另外一个冷知识：Meta 内部把 system 设计轮叫 **"Pirate" 轮**（因为主持这轮的 interviewer 小组代号 "Pirates"），近年又分化出偏 API/产品设计的 **"Pirate X"**（see [08 Company Style Guide](08-company-guides.md)）。
 
-## 2. 四种常见面试形式
+## 2. 面试的四种 formats
 
 按 Design Gurus 的分类（E5 backend 方向 90% 是第一种）：
 
@@ -43,7 +43,7 @@
 
 > Meta 特别提示：E5 可能遇到 **Product Architecture 轮**（偏 API/data modeling/user flow）而非传统 System Design 轮（偏基础设施/scalability）。rubric 相同，但 deep dive 方向不同——见过太多人按纯 backend 准备结果撞上 Product Architecture。
 
-## 3. 四维评分标准（参考 Hello Interview）
+## 3. four-dimension rubric（Hello Interview Rubric）
 
 这是目前公开最接近大厂内部评分表的 framework，**四个 dimension、按百分比加权**：
 
@@ -73,7 +73,7 @@
 
 > 注意 30/30/20/20 这个 structure 传递的 signal：**「走对了流程」和「approach 合理」占 60 分，比「技术多硬核」更重要**。很多人挂在这一关不是因为技术差，而是因为流程失控——不问需求直接画图，或者被自己带进死角出不来。
 
-## 4. 面试官在评分时关注什么
+## 4. interviewer 在打分时实际在想什么
 
 把 rubric 翻译成 interviewer 的内心 OS：
 
@@ -87,7 +87,7 @@
 
 **E5 的 dividing line**：E4 interviewer 拉着你走完全程也能过；E5 必须是你驱动全程，interviewer 只是在 review 你的设计。
 
-## 5. 一场 45 分钟面试的节奏
+## 5. 一场 45 分钟面试的真实解剖
 
 ```
 0:00–2:00 interviewer 介绍题目（很模糊的一句话）
@@ -100,6 +100,6 @@
 
 每一阶段的具体打法见 [03 delivery framework](03-delivery-framework.md)。
 
-## 下一章
+## Next Module
 
 → [02 · E5/Senior 的 Expectations](02-e5-senior-expectations.md)
