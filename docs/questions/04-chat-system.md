@@ -1,124 +1,220 @@
 # Q4 · Chat / Messaging
 
-> Difficulty: Medium ｜ archetype：state sync（long-lived connection）
-> 把「connection layer / message delivery semantics / group chat 扇出」三件事讲清楚，这题就赢了。deep dive 可以无限深，是 impression 功底的好题。
+> 难度：Medium ｜ 原型：状态同步与长连接
+>
+> 这道题的难点不在“加一个 WebSocket”，而在于同时处理可靠投递、会话内顺序、离线恢复、群聊扩展与端到端加密。面试时先把这些语义讲清楚，再画架构。
 
 ## 1. 题目描述
 
-"设计一个 WhatsApp/微信级别的 chat system：一对一聊天、online presence、message read receipts。"
+设计一个 WhatsApp 级别的聊天系统，支持：
+
+- 一对一聊天和群聊；
+- 在线实时消息、离线消息补投；
+- 已发送、已送达、已读回执；
+- 多设备同步；
+- 图片、视频等媒体消息；
+- 端到端加密（E2EE）。
+
+本题不要求完整设计密钥协商协议，但应明确：服务端路由和存储的是密文，不应读取消息明文。
 
 ## 2. 澄清问题
 
-| 问题 | intent |
-|------|------|
-| group chat 最大多少人？（1:1 / 百人群 / 万人直播群）| 扇出复杂度差三个 order of magnitude |
-| online presence 要多 real-time？| push model 的 selection 依据 |
-| message 保序的 scope？（同一 session 内？global？）| **必须问**——保序是这题的技术 core |
-| offline messages retention period？| storage estimation |
-| multi-device sync 要不要？| sync semantics 复杂度翻倍 |
-| 媒体 message（图片/videos）？| 分离媒体 pipeline（本题可先略，提一句）|
+| 问题 | 为什么要问 |
+|---|---|
+| 最大日活、峰值消息量和在线连接数是多少？ | 决定连接层、写入和存储规模 |
+| 群聊最大规模是多少？ | 百人群与十万人频道的扇出策略完全不同 |
+| 顺序要求是什么？ | 通常只要求**同一会话内**的可解释顺序，不做全局总序 |
+| “已发送 / 已送达 / 已读”分别由谁确认？ | 决定确认点与状态机 |
+| 离线消息保留多久？ | 决定存储成本与同步方式 |
+| 是否支持多设备、消息撤回和编辑？ | 会显著增加状态同步复杂度 |
+| 是否要求端到端加密？ | 决定服务端可见性、搜索能力与媒体上传流程 |
+
+一个好的默认假设是：消息正文默认保留一年；在线用户约为 DAU 的 10%–20%；允许在线状态有 30 秒左右的陈旧窗口。
 
 ## 3. 估算推演
 
+假设：
+
 ```
-50M DAU，per-user 40 条/天 ≈ 2B msg/day ≈ 23K msg/s average
-同时 online user ≈ DAU × 10~20% ≈ 5~10M long-lived connection
-单 connection gateway node（16GB memory）扛 ~100K connection → 需要 50~100 台 connection layer
-message 160B（类 WhatsApp）+ 元 data ≈ 500B/条
-storage = 2B × 500B × 2(收发双方) × 1 年 ≈ 700TB/年 → 必须 sharding
+50M DAU
+每位用户每天 40 条消息
+≈ 2B 条消息/天
+≈ 23K 条/秒平均写入；峰值按 5 倍估算，约 115K 条/秒
+
+同时在线用户：5M–10M
+若单台 Gateway 可稳定维持约 100K 条空闲长连接
+→ 连接层需要约 50–100 台实例，另加冗余与滚动发布余量
+
+每条文字消息及必要元数据约 500B
+逻辑消息存储：2B × 500B × 365 ≈ 365TB/年
+若采用三副本持久化，约为 1.1PB/年
+媒体文件不计入此数，应走独立对象存储链路
 ```
+
+估算的结论不是“必须使用某个数据库”，而是：
+
+1. 消息必须按会话分片，单表或单实例写入不可行；
+2. 长连接层与消息存储层需要独立扩展；
+3. 媒体不能占用文本消息主链路。
 
 ## 4. 高层设计
 
 ```
-                          ┌──────────── connection layer（stateless 化）────────────┐
-client A ──ws──▶ LB ──▶ Chat Gateway #1 ─┐
-                                          ├─▶ routing service（user → gateway 映射）
-client B ──ws──▶ LB ──▶ Chat Gateway #2 ─┘ │
-                                                   ▼
-   message pipeline：API ──▶ message service ──▶ Kafka（按 conversation_id partition）
-                                  │
-                                  ▼
-                          message storage（Cassandra，按 session partition）
-                                  │
-                                  ▼
-                          delivery service ──▶ 查 routing ──▶ target gateway ──ws──▶ client B
-                                                       │（offline）
-                                                       ▼
-                                                  push service(APNs/FCM)
-online presence：heartbeat(minute-level) → state service(Redis TTL) → subscription 者增量 sync
-read receipts：client ACK 携带 last_read_msg_id → write 回 → 反向通知对方
+发送端客户端
+  │  本地 outbox；客户端完成 E2EE 加密
+  ▼
+Gateway / Load Balancer
+  │  鉴权、限流、连接管理
+  ▼
+Message Service
+  │  按 conversation_id 路由；去重；分配会话内 sequence_no
+  ▼
+Durable Log / Message Store
+  │  先持久化，再向发送端确认“已发送”
+  ├──────────────► Conversation Message Store
+  ▼
+Delivery Service ──► Connection Router ──► 在线接收端 Gateway ──► 接收端客户端
+  │
+  └──────────────► APNs / FCM 通知；接收端上线后按游标补拉
+
+Presence：客户端心跳 ──► Presence Store（带 TTL）
+Read receipt：客户端上报 last_read_seq ──► 用户会话状态 ──► 通知发送端
+媒体：客户端加密后直传对象存储；聊天消息只携带加密对象引用
 ```
 
-## 5. 数据模型
+这里有一个容易被说错的点：Gateway 不是完全无状态的，因为 TCP/WebSocket 连接就在它的内存中。真正外置的是 `user_id → gateway_id` 的可恢复路由状态。这样任一 Gateway 故障后，客户端可以重连到其他实例，投递服务也不依赖某台机器的私有内存。
 
-```
-Cassandra（write-heavy read point lookups、按 session clustering、naturally shardable）：
+## 5. 消息与用户状态模型
+
+```sql
 messages (
-  conversation_id UUID, -- partition key
-  message_id TIMEUUID, -- clustering key，TIMEUUID 天然按时间 ordered = session 内保序
-  sender_id, content, type,
-  created_at
+  conversation_id,
+  bucket,          -- 按日期或 sequence 范围切分，避免无限大分区
+  sequence_no,     -- 服务端分配；同一会话内单调递增
+  message_id,      -- canonical ID
+  sender_id,
+  ciphertext,
+  type,
+  created_at,
+  PRIMARY KEY ((conversation_id, bucket), sequence_no)
 )
 
-inbox_state (
-  user_id, -- partition key
+user_conversation_state (
+  user_id,
   conversation_id,
-  last_read_msg_id TIMEUUID,
-  last_delivered_msg_id
-) -- 每 user conversation list、未 read 数、read receipts 游标
+  last_delivered_seq,
+  last_read_seq,
+  unread_count,
+  updated_at,
+  PRIMARY KEY (user_id, conversation_id)
+)
+
+message_dedup (
+  sender_id,
+  client_message_id,
+  canonical_message_id,
+  PRIMARY KEY (sender_id, client_message_id)
+)
 ```
 
-**为什么 Cassandra**："按 conversation_id partition → 一个 session 的所有 message 在同一 node → session 内 ordering 由 clustering key 保证，**partition key + clustering key 的设计直接实现'session 内保序'这个 core 需求**，这是 KV wide-column model 和需求天然咬合的案例。"
+核心想法是：
+
+- `messages` 是每个会话的权威消息日志，不必为收发双方各复制一份完整正文；
+- `user_conversation_state` 保存每个用户的游标和未读状态；
+- `client_message_id` 由客户端在重试前生成，用来实现幂等；
+- `sequence_no` 是展示和补洞的依据，不能依赖客户端时间戳。
+
+Cassandra、DynamoDB 或按会话分片的关系型数据库都可能合适。关键是写入模式、会话内顺序、按游标读取和分片扩容路径，而不是死记某一种产品。
 
 ## 6. 深入分析
 
-### Deep Dive A · long-lived connection 与 delivery model（must-know）
+### A. 长连接、路由与重连
 
-- **polling / long polling / WebSocket / SSE** 四档 comparison——手机端省电 vs real-time 性的 trade-off
-- WebSocket 双向低 latency 但：connection state 在 gateway memory 里 → **gateway 必须处理重连 storm**（地铁里一车厢人同时断线重连：random backoff + connection count rate limiting）
-- **routing 表**（user → gateway）放 Redis：gateway 上下线时 cleanup（heartbeat TTL），delivery service 查表 routing——"connection layer stateless 化"的关键就是 routing 外置
+WebSocket 适合双向、低延迟的聊天；短轮询会带来大量无效请求，长轮询则在实时性、服务器连接开销和实现复杂度之间折中。
 
-### Deep Dive B · message delivery semantics（本题的 E5 core 区）
+连接建立后，Gateway 向路由表登记：
 
-三个 state machine：**发送中 → 已送达（server ack）→ read receipts（recipient ack）**。
+```
+user_id → gateway_id, connection_id, device_id, expires_at
+```
 
-必须主动讲的坑：
-- **dedup**：client 重发（timeout retry）导致重复 → client generate message UUID，server idempotent dedup
-- **ordering**：接收端按 (conversation_id, message_id) ranking，不依赖到达 ordering
-- **offline delivery**：上线后按 inbox_state 游标拉增量——"推拉结合：online 走 push，push 失败/offline 走 pull fallback"
-- 至少一次 + idempotent = 事实上的恰好一次（**这套 combination 拳是 distributed message 的万能答案**）
+客户端通过 ping 或业务心跳续期。Gateway 宕机、网络切换或客户端进入后台后，条目自动过期；客户端指数退避重连。重连后的正确性不靠“连接永远不断”，而靠按 `last_delivered_seq` 拉取遗漏消息。
 
-### Deep Dive C · online presence
+### B. 可靠投递：三类确认、重试与顺序
 
-- heartbeat（WebSocket ping，minute-level）→ Redis `user:{id}` 带 TTL——TTL 到期自动"下线"，不需要 cleanup 任务
-- state storm：上线/下线 event 别全员广播 → **按 session subscription**（你的好友打开 session 才拉 state）
-- trade-off："state 允许 stale 30 秒，省下的是数百万 QPS 的 state sync。聊天 scenario 没人会为'好友明明 online 却显示 offline'投诉。"
+状态应明确分开：
 
-### Deep Dive D · group chat 扇出
+| 状态 | 确认方 | 正确的确认时机 |
+|---|---|---|
+| 已发送 | 服务端 | 消息已进入可恢复的持久化路径 |
+| 已送达 | 接收端设备 | 接收端客户端已收到并持久化该消息 |
+| 已读 | 接收端设备 | 用户已读到该消息，客户端上报 `last_read_seq` |
 
-| 群 scale | 策略 |
-|--------|------|
-| ≤ 200 | write fan-out：一条 message × N 个收件人 inbox record（WhatsApp model）|
-| 数千+ | read fan-out + write fan-out 混合：大群单独存一份，成员 pull；只给成员的 conversation list write 一条指针 |
+发送端超时后必然会重试。若服务端已成功写入、但确认包丢失，没有 `client_message_id` 就会产生重复消息。因此服务端以 `(sender_id, client_message_id)` 去重：重复请求返回第一次写入的结果。
 
-"write fan-out 简单但 N 倍 storage/write amplification；read fan-out 省 write 但 online members 都要 real-time 拉。**dividing line 按群 scale 划**，这是 real-world systems（微信/微博）的成熟做法。"
+这给用户带来“只看到一次”的语义，但不应称为严格的端到端 exactly-once。真实系统通常是：
 
-### Deep Dive E · multi-device sync
+> 至少一次投递 + 幂等处理 + 按会话序号重排 = 用户可见的近似一次语义。
 
-每设备独立 `device_id` + 独立 read receipts/已送达游标；message 按 session multi-device delivery；删除/撤回是**sync event**（同样走 message pipeline push-down tombstone）。提一句就够，除非 interviewer 明确要。
+对于顺序，同一 `conversation_id` 必须路由到同一个逻辑分区或顺序权威；不同会话不需要全局排序。接收端若发现序号有洞，可以短暂等待、请求补拉，再按 `sequence_no` 展示。
+
+### C. 端到端加密（WhatsApp 题不能漏）
+
+发送端使用接收端设备的公钥材料加密消息；服务端只看到密文、会话路由信息和必要元数据。服务端需要支持公钥或预密钥的分发，但不应持有可解密正文的密钥。
+
+由此带来的取舍：
+
+- 服务端不能直接做明文全文搜索、内容理解或基于正文的推荐；
+- 多设备意味着每台设备都有自己的密钥材料与投递状态；
+- 图片和视频也应在客户端加密后上传，聊天消息只携带对象引用及解密所需信息；
+- 服务器端仍可基于频率、连接行为等元数据做部分反滥用控制，但能力受到限制。
+
+面试中可以把具体密钥协商协议明确列为后续深入项；重点是把 E2EE 作为架构边界，而不是末尾随口补一句。
+
+### D. 小群与大群的扇出
+
+| 场景 | 主要策略 | 原因 |
+|---|---|---|
+| 一对一与小群 | 偏写时扇出 | 成员少，在线投递和未读状态易维护，延迟低 |
+| 大群/频道 | 偏读时聚合，配合有限推送 | 若把每条消息复制给十万成员，写放大会失控 |
+| 超大频道 | 单份会话日志 + 成员游标 | 正文只存一份，成员按游标拉取 |
+
+分界不是固定的“200 人”，而取决于：
+
+```
+群成员数 × 消息频率 × 可接受投递延迟
+```
+
+小群可以为每个成员维护更丰富的投递状态；大群则应把“所有成员立刻收到每条消息”降级为按需拉取或通知驱动的同步。
+
+### E. 多设备、离线同步与媒体
+
+每个设备有独立的 `device_id`、连接路由和投递游标。消息发送后需投递到同一用户的所有活动设备；已读状态可按产品选择“任一设备已读即全局已读”或“各设备独立已读”。
+
+离线恢复统一通过游标完成：
+
+```
+GET /conversations/{id}/messages?after_sequence_no=N
+```
+
+推送通知只负责提醒或唤醒客户端，不能被当作可靠消息通道。
+
+媒体消息的正确路径是：客户端加密后向对象存储申请预签名上传地址并直传，成功后再发一条携带对象引用的聊天消息。这样大文件不会阻塞文本消息的低延迟通道。
 
 ## 7. 常见失分点
 
-- 用 HTTP 短 polling 做 core message 通道且讲不出 cost
-- message 存 MySQL 单表、没有 sharding 故事（2B/day write 入）
-- 没有 dedup/ordering 讨论（被问"network retry 重发怎么办"当场卡住）
-- online presence 全员广播（没算过 QPS）
-- read receipts feature 没有游标设计（每次全量比对？）
+- 把“服务端收到请求”当作“已发送”，却未说明持久化确认点；
+- 把“至少一次 + 幂等”直接称为严格 exactly-once；
+- 用客户端时间戳保证顺序，或声称需要全局消息顺序；
+- 只谈在线 WebSocket，不说明离线补拉、网关故障和重连恢复；
+- 将消息正文为每个群成员完整复制，却不讨论大群写放大；
+- 把 APNs / FCM 当作可靠消息存储；
+- 题目明确是 WhatsApp，却完全遗漏端到端加密；
+- 把一个会话永久放在单个无界数据库分区中。
 
 ## 8. 一分钟总结
 
-"connection layer WebSocket gateway cluster（10M concurrency connection，50–100 台），routing 表外置 Redis 实现 connection layer stateless 化；message 走 API → Kafka 按 conversation partition → Cassandra 按 session partition，partition key+TIMEUUID clustering 天然实现 session 内保序。delivery semantics：client message UUID idempotent dedup + 接收端按 ID 重排 + at-least-once pipeline = 事实 exactly-once；offline 走 push service + 上线按游标增量拉。online presence heartbeat + TTL、按 session subscription、容忍 30 秒 stale。group chat 按 scale 分界：小群 write fan-out、大群 read fan-out。媒体 message 走独立的 object storage + CDN pipeline，不占聊天链路。"
+“我会把消息按 `conversation_id` 分区，并由服务端分配会话内单调递增的 `sequence_no`，从而保证会话内可解释的顺序。发送端携带稳定的 `client_message_id`；服务端在消息进入可恢复的持久化路径后才确认已发送，重试通过幂等键去重，因此系统提供至少一次投递下用户可见的近似一次语义。在线用户走 WebSocket 推送，离线或重连用户按游标补拉；路由状态外置，因此网关故障可恢复。小群偏写时扇出，大群转向单份会话日志加游标读取。由于题目是 WhatsApp，服务端只路由和存储密文，端到端加密是设计边界；媒体也由客户端加密后直传对象存储。”
 
 ---
 ← [Q3 Top-K](03-top-k-heavy-hitters.md) ｜ [Q5 News Feed →](05-news-feed.md)
