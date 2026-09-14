@@ -29,23 +29,14 @@ takeaway → two storage worlds: raw events go to the lake (immutable, recompute
 
 ## 4. High-Level Design
 
-```
-SDK/frontend ──▶ event ingestion API (validation, tagging) ──▶ Kafka (separate topics: impressions / clicks)
-                                              │
-             ┌────────────────────────────────┤
-             ▼                                ▼
-      real-time stream (Flink/Beam)         batch layer (nightly Spark)
-      · dedup (click against impression)    · full recompute to exact values
-      · session-window join (click↔imp)     · audit reconciliation
-      · minute-level pre-aggregation        │
-             │                              │
-             ▼                              ▼
-      Redis / in-memory OLAP (real-time preview)   OLAP (ClickHouse/BigQuery, reports)
-             │                              │
-             └────────────► query service ◄────────┘
-                                │
-                                ▼
-                      billing system (the batch layer's exact numbers are authoritative)
+```mermaid
+flowchart TB
+    SDK["SDK / frontend"] --> Ingest["Event ingestion API"] --> Kafka["Kafka: impressions and clicks"]
+    Kafka --> Stream["Stream processor: dedup + window aggregation"] --> Realtime["Redis / real-time OLAP"]
+    Kafka --> Batch["Batch processor: exact recomputation + audit"] --> OLAP["OLAP warehouse"]
+    Realtime --> Query["Query service"]
+    OLAP --> Query --> Reports["Reporting / dashboard"]
+    OLAP --> Billing["Billing: exact batch values"]
 ```
 
 **The narrative spine**: "The real-time layer serves ops (minute-level, approximate, recompute-able); the batch layer serves money (hour/day-level, exact, auditable) — **the same data, two timelines**. This is the textbook lambda scenario."

@@ -23,13 +23,14 @@
 
 ## 4. High-Level Design
 
-```
-                        ┌────────────────────────────┐
-client ──▶ API Gateway ──▶ rate limiting middleware (in-process) ──▶ business service
-                          │ ↑ rule push-down (config center)
-                          │ ↕ async counter sync (Redis, eventually consistent)
-                          └────────────────────────────┘
-rate-limited request ──▶ 429 + Retry-After ──▶ (optional) Kafka record of rate-limited event
+```mermaid
+flowchart TB
+    Client["Client"] --> Gateway["API gateway"] --> Limiter["In-process rate limiter"]
+    Limiter -->|"Allowed"| Service["Business service"]
+    Config["Config center"] -->|"Rules"| Limiter
+    Limiter <-->|"Batched counter convergence"| Counters["Redis counters"]
+    Limiter -->|"Rejected"| Response["429 + Retry-After"]
+    Limiter -. "Rate-limit events (optional)" .-> Events["Kafka"]
 ```
 
 **Key architecture decision**: "Rate limiting is done **in-process in the gateway/middleware**; Redis only handles cross-instance counter convergence (async/quasi-sync). A synchronous Redis call on every request turns the rate limiter itself into a 200K QPS Redis cluster—the cure is worse than the disease."

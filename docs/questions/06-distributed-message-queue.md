@@ -28,18 +28,13 @@ takeaway → the append-only log isn't a choice, it's a law of physics
 
 ## 4. High-Level Design
 
-```
-Producer ──▶ Broker cluster
-              ┌───────────────────────────────────────┐
-              │ Topic: orders │
-              │ Partition 0 (broker 1) [log: seg0 seg1 seg2...] │
-              │ Partition 1 (broker 2) [log: ...] │
-              │ Partition 2 (broker 3) [log: ...] │
-              └───────────────────────────────────────┘
-              Each partition = Leader (writes) + ISR replicas (synchronous replication)
-Metadata/leader election: Controller / ZooKeeper / Raft
-Consumer Group: within each group, each partition is assigned to exactly one consumer instance
-              offsets committed to an internal topic (__consumer_offsets)
+```mermaid
+flowchart TB
+    Producer["Producers"] --> Leader["Partition leader on broker"]
+    Leader -->|"Synchronous replication"| ISR["ISR replicas"]
+    Controller["Controller / Raft metadata"] -. "Leader election" .-> Leader
+    Consumers["Consumer group"] -->|"Fetch by offset"| Leader
+    Consumers --> Offsets["Internal offset topic"]
 ```
 
 ## 5. Data Model (where the core insight lives)

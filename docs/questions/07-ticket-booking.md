@@ -28,21 +28,14 @@ takeaway → 99% of the traffic (browsing, refreshing, querying remaining ticket
 
 ## 4. High-Level Design
 
-```
-Before the onsale: static event pages + CDN (search/detail 100% cached, zero origin traffic)
-During the onsale:
-  user ──▶ queueing gateway (Virtual Waiting Room: ID issuance + token + heartbeat)
-              │ (admit in batches, e.g. 2,000 people every 5 seconds)
-              ▼
-          Remaining-ticket query (Redis inventory snapshot cache, second-level refresh)
-              │ tickets available
-              ▼
-          Order service ──▶ inventory decrement (atomic operation, see Deep Dive A)
-              │ success        │ failure
-              ▼                ▼
-          Order created (15-min payment window)   re-queue / waitlist
-              ▼
-          Payment (async callback) ──▶ ticket issuance (seat/ticket code, written to the store, eventually consistent)
+```mermaid
+flowchart TB
+    Visitor["Visitor"] --> CDN["CDN: static sale page"]
+    Visitor --> Waiting["Virtual waiting room"] --> Admission["Controlled admission"]
+    Admission --> Inventory["Atomic inventory reservation"]
+    Inventory -->|"Reserved"| Order["Order service: 15-minute payment window"]
+    Order --> Payment["Payment"] --> Ticket["Ticket issuance"]
+    Inventory -->|"Sold out"| Waitlist["Waitlist / requeue"]
 ```
 
 **The architecture narrative**: "I use a **queueing room to turn an uncontrollable traffic surge into a controllable, steady flow** — users take a number and enter, instead of all of them hammering the business layer; only admitted requests touch inventory. This one decision solves both overload and fairness (first-come, first-served) at the same time."

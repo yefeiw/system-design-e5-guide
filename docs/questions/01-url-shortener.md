@@ -30,16 +30,14 @@ takeaway → the read path must be cached; writes and storage are under no press
 
 ## 4. High-Level Design
 
-```
-client ──POST /url──▶ LB ──▶ URL shortener (stateless) ──▶ ID generator
-                                   │
-                                   ▼
-                                MySQL (primary/replica)
-client ──GET /abc123──▶ LB ──▶ URL shortener ──▶ Redis cache ──(miss)──▶ MySQL
-                                   │
-                                   ▼
-                              return 301/302 + original URL
-(click event ──▶ Kafka ──▶ analytics pipeline, if the problem asks for counting)
+```mermaid
+flowchart TB
+    Client["Client"] --> LB["Load balancer"] --> Service["URL shortener service"]
+    Service -->|"Create: allocate ID + Base62"| Primary["MySQL primary"]
+    Service -->|"Redirect: cache-aside read"| Cache["Redis cache"]
+    Cache -. "Miss" .-> Replica["MySQL read replica"]
+    Service -->|"301 or 302 redirect"| Client
+    Service -->|"Click event (optional)"| Stream["Kafka"] --> Analytics["Analytics pipeline"]
 ```
 
 Data flow, spoken version: "Creation goes through the service tier to get a unique ID, encodes it into a short code, and writes to the primary DB; access goes to the cache first, and on a miss it goes back to the source and backfills."

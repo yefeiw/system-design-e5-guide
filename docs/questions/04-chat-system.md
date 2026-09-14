@@ -41,31 +41,15 @@ The conclusion of this estimation is not "you must use a particular database." I
 
 ## 4. High-Level Design
 
-```
-                        ┌─────────── connection layer (routing state externalized) ───────────┐
-client A ──MQTT/WS──▶ LB ──▶ Chat Gateway #1 ─┐
-                                              ├─▶ routing service (user+device → gateway, Redis TTL)
-client B ──MQTT/WS──▶ LB ──▶ Chat Gateway #2 ─┘
-                                                     │
-   message pipeline:                                 ▼
-   client local outbox → E2EE encrypt → API ──▶ message service (dedup + assign sequence_no)
-                                  │
-                                  ▼
-                          Kafka (partitioned by conversation_id)
-                                  │
-                                  ▼
-                          message storage (Cassandra, partitioned by session)
-                                  │
-                                  ▼
-                          delivery service ──▶ look up routing ──▶ target gateway ──▶ client B (device ACK)
-                                                       │ (offline / app killed)
-                                                       ▼
-                                                  push service (APNs/FCM) — wake-up only, not a reliable channel
-
-real-time signal tiers (the core diagram of this chapter):
-  durable       message body         → full pipeline (persist → deliver → device ACK)
-  semi-durable  delivery/read cursor → inbox_state, recoverable after reconnect
-  ephemeral     typing / presence    → not persisted, no delivery guarantee; gateway looks up routing and pushes straight to the online peer
+```mermaid
+flowchart TB
+    Sender["Client A"] --> LB["Load balancer"] --> GatewayA["Chat gateway"]
+    GatewayA --> Message["Message service: dedup + sequence number"]
+    Message --> Kafka["Kafka: partition by conversation_id"]
+    Kafka --> Storage["Durable message storage"]
+    Kafka --> Delivery["Delivery service"]
+    Delivery --> Routing["Routing: user/device to gateway"] --> GatewayB["Target gateway"] --> Recipient["Client B"]
+    Delivery -->|"Offline notification"| Push["APNs / FCM"] --> Recipient
 ```
 
 One point people get wrong: **a gateway is not fully stateless** — the TCP/WebSocket connection lives in its memory. What's actually externalized is the recoverable `user_id → gateway_id` routing state. That way, when any gateway fails, the client can reconnect to a different instance, and the delivery service never depends on one machine's private memory.

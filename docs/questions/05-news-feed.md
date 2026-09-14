@@ -29,22 +29,15 @@ takeaway → write fan-out's write QPS is ~300x the posting QPS; this is the sou
 
 ## 4. High-Level Design
 
-```
-posting: client ──▶ Post API ──▶ Post Service ──▶ Post Store (Cassandra/sharding)
-                                        │
-                                        ▼
-                              Kafka (fan-out event)
-                                        │
-                              ┌─────────┴─────────┐
-                              ▼ ▼
-                     Fanout Worker (push path)   Follow Graph Service
-                       append post_id to each    (Graph)
-                       follower's feed cache     │
-                              │ │
-                              ▼ ▼
-Feed refresh: Feed API ──▶ User Feed Cache (Redis List, the pushed timeline)
-                       │ (cache miss / hybrid path)
-                       └──▶ On-the-fly feed assembly (pull): look up follow list → batch-fetch recent posts → merge
+```mermaid
+flowchart TB
+    Creator["Post creator"] --> PostAPI["Post API"] --> Posts["Post store"]
+    Posts --> Kafka["Kafka fanout event"] --> Fanout["Fanout worker"] --> Timeline["Follower timeline cache"]
+    Graph["Follow graph"] --> Fanout
+    Reader["Feed reader"] --> FeedAPI["Feed API"] --> Timeline
+    FeedAPI -. "Miss / pull path" .-> Merge["Pull merge service"]
+    Graph --> Merge
+    Posts --> Merge
 ```
 
 ## 5. Data Model
