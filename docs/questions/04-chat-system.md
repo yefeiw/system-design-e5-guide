@@ -41,16 +41,7 @@ The conclusion of this estimation is not "you must use a particular database." I
 
 ## 4. High-Level Design
 
-```mermaid
-flowchart TB
-    Sender["Client A"] --> LB["Load balancer"] --> GatewayA["Chat gateway"]
-    GatewayA --> Message["Message service: dedup + sequence number"]
-    Message --> Kafka["Kafka: partition by conversation_id"]
-    Kafka --> Storage["Durable message storage"]
-    Kafka --> Delivery["Delivery service"]
-    Delivery --> Routing["Routing: user/device to gateway"] --> GatewayB["Target gateway"] --> Recipient["Client B"]
-    Delivery -->|"Offline notification"| Push["APNs / FCM"] --> Recipient
-```
+![High-level architecture diagram](../assets/diagrams/04-chat-system.svg)
 
 One point people get wrong: **a gateway is not fully stateless** — the TCP/WebSocket connection lives in its memory. What's actually externalized is the recoverable `user_id → gateway_id` routing state. That way, when any gateway fails, the client can reconnect to a different instance, and the delivery service never depends on one machine's private memory.
 

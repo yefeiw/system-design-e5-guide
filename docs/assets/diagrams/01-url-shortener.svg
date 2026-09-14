@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc" viewBox="0 0 1400 720">
+  <title id="title">URL Shortener high-level architecture</title>
+  <desc id="desc">Clients use a stateless URL shortener. Creates allocate an ID and write to MySQL; redirects read Redis first and emit optional click events to Kafka.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L8,3 z" fill="#64748B"/></marker>
+    <style>
+      .title { font: 700 29px Inter, ui-sans-serif, system-ui, sans-serif; fill: #0F172A; }
+      .subtitle { font: 400 15px Inter, ui-sans-serif, system-ui, sans-serif; fill: #475569; }
+      .node-label { font: 600 16px Inter, ui-sans-serif, system-ui, sans-serif; fill: #172554; }
+      .edge-label { font: 500 12px Inter, ui-sans-serif, system-ui, sans-serif; fill: #475569; }
+      .group-label { font: 600 14px Inter, ui-sans-serif, system-ui, sans-serif; fill: #334155; }
+      .legend { font: 500 12px Inter, ui-sans-serif, system-ui, sans-serif; fill: #64748B; }
+    </style>
+  </defs>
+  <rect width="100%" height="100%" fill="#F8FAFC"/>
+  <rect x="28" y="24" width="8" height="50" rx="4" fill="#4F46E5"/>
+  <text x="54" y="47" class="title">URL Shortener</text>
+  <text x="54" y="70" class="subtitle">High-level architecture · Read-heavy redirect path with cache-aside storage</text>
+  <text x="1364" y="48" text-anchor="end" class="legend">Blue: service path  ·  Orange: event stream  ·  Green: durable data  ·  Purple: control plane</text>
+  
+  <path d="M 250 269 L 300 269" fill="none" stroke="#64748B" stroke-width="2.5"  marker-end="url(#arrow)"/>
+  <path d="M 490 269 L 540 269" fill="none" stroke="#64748B" stroke-width="2.5"  marker-end="url(#arrow)"/>
+  <path d="M 635 230 L 635 149 L 900 149 L 900 149" fill="none" stroke="#64748B" stroke-width="2.5"  marker-end="url(#arrow)"/><g><rect x="704" y="123" width="112" height="22" rx="6" fill="#F8FAFC"/><text x="760" y="138" text-anchor="middle" class="edge-label">Create: ID + Base62</text></g>
+  <path d="M 730 269 L 900 289" fill="none" stroke="#64748B" stroke-width="2.5"  marker-end="url(#arrow)"/><g><rect x="759" y="233" width="112" height="22" rx="6" fill="#F8FAFC"/><text x="815" y="248" text-anchor="middle" class="edge-label">Redirect read</text></g>
+  <path d="M 995 328 L 995 390" fill="none" stroke="#64748B" stroke-width="2.5"  marker-end="url(#arrow)"/><g><rect x="939" y="337" width="112" height="22" rx="6" fill="#F8FAFC"/><text x="995" y="352" text-anchor="middle" class="edge-label">Miss</text></g>
+  <path d="M 635 308 L 665 510" fill="none" stroke="#64748B" stroke-width="2.5"  marker-end="url(#arrow)"/><g><rect x="579" y="437" width="112" height="22" rx="6" fill="#F8FAFC"/><text x="635" y="452" text-anchor="middle" class="edge-label">Click event</text></g>
+  <path d="M 760 549 L 950 549" fill="none" stroke="#64748B" stroke-width="2.5"  marker-end="url(#arrow)"/>
+  
+    <g>
+      <rect x="60" y="230" width="190" height="78" rx="16" fill="#E0F2FE" stroke="#0284C7" stroke-width="2"/>
+      <text x="155" text-anchor="middle" class="node-label"><tspan x="155" y="274">Client</tspan></text>
+    </g>
+  
+    <g>
+      <rect x="300" y="230" width="190" height="78" rx="16" fill="#EEF2FF" stroke="#4F46E5" stroke-width="2"/>
+      <text x="395" text-anchor="middle" class="node-label"><tspan x="395" y="274">Load balancer</tspan></text>
+    </g>
+  
+    <g>
+      <rect x="540" y="230" width="190" height="78" rx="16" fill="#EEF2FF" stroke="#4F46E5" stroke-width="2"/>
+      <text x="635" text-anchor="middle" class="node-label"><tspan x="635" y="264.5">URL shortener service</tspan><tspan x="635" y="283.5">Stateless</tspan></text>
+    </g>
+  
+    <g>
+      <rect x="900" y="110" width="190" height="78" rx="16" fill="#ECFDF5" stroke="#059669" stroke-width="2"/>
+      <text x="995" text-anchor="middle" class="node-label"><tspan x="995" y="144.5">MySQL primary</tspan><tspan x="995" y="163.5">Create mapping</tspan></text>
+    </g>
+  
+    <g>
+      <rect x="900" y="250" width="190" height="78" rx="16" fill="#ECFDF5" stroke="#059669" stroke-width="2"/>
+      <text x="995" text-anchor="middle" class="node-label"><tspan x="995" y="284.5">Redis cache</tspan><tspan x="995" y="303.5">Read mapping</tspan></text>
+    </g>
+  
+    <g>
+      <rect x="900" y="390" width="190" height="78" rx="16" fill="#ECFDF5" stroke="#059669" stroke-width="2"/>
+      <text x="995" text-anchor="middle" class="node-label"><tspan x="995" y="424.5">MySQL read replica</tspan><tspan x="995" y="443.5">Cache miss origin</tspan></text>
+    </g>
+  
+    <g>
+      <rect x="570" y="510" width="190" height="78" rx="16" fill="#FFF7ED" stroke="#EA580C" stroke-width="2"/>
+      <text x="665" text-anchor="middle" class="node-label"><tspan x="665" y="554">Kafka click stream</tspan></text>
+    </g>
+  
+    <g>
+      <rect x="950" y="510" width="190" height="78" rx="16" fill="#F0FDF4" stroke="#16A34A" stroke-width="2"/>
+      <text x="1045" text-anchor="middle" class="node-label"><tspan x="1045" y="554">Analytics pipeline</tspan></text>
+    </g>
+</svg>

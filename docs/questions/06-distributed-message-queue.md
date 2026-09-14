@@ -28,14 +28,7 @@ takeaway → the append-only log isn't a choice, it's a law of physics
 
 ## 4. High-Level Design
 
-```mermaid
-flowchart TB
-    Producer["Producers"] --> Leader["Partition leader on broker"]
-    Leader -->|"Synchronous replication"| ISR["ISR replicas"]
-    Controller["Controller / Raft metadata"] -. "Leader election" .-> Leader
-    Consumers["Consumer group"] -->|"Fetch by offset"| Leader
-    Consumers --> Offsets["Internal offset topic"]
-```
+![High-level architecture diagram](../assets/diagrams/06-distributed-message-queue.svg)
 
 ## 5. Data Model (where the core insight lives)
 

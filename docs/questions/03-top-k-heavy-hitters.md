@@ -30,14 +30,7 @@ takeaway → ask first: if cardinality is bounded, the exact approach's memory h
 
 ## 4. High-Level Design
 
-```mermaid
-flowchart TB
-    Sources["Event sources"] --> Kafka["Kafka: partition by item_id"]
-    Kafka --> Stream["Partition aggregators: counts + local Top-K"]
-    Stream --> Merger["Global Top-K merger"] --> Query["Query service + Redis"]
-    Kafka --> Lake["Raw-event data lake"] --> Batch["Nightly exact recomputation"]
-    Batch -. "Correction / audit" .-> Query
-```
+![High-level architecture diagram](../assets/diagrams/03-top-k-heavy-hitters.svg)
 
 **Architecture narrative**: "The hot path fans out through Kafka by partition; each partition maintains a streaming counter plus a local Top-K heap, and a lightweight merge layer merges the per-partition local Top-Ks into the global Top-K—because **the union of the local Top-Ks necessarily contains the global Top-K** (every item's global counter is ≥ its local counter in any partition, so the item ranked K globally must land in the local Top-K of the partition where it is strongest). That means the merger only has to process K×partition count candidates, not a full ranking."
 

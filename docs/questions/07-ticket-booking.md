@@ -28,15 +28,7 @@ takeaway → 99% of the traffic (browsing, refreshing, querying remaining ticket
 
 ## 4. High-Level Design
 
-```mermaid
-flowchart TB
-    Visitor["Visitor"] --> CDN["CDN: static sale page"]
-    Visitor --> Waiting["Virtual waiting room"] --> Admission["Controlled admission"]
-    Admission --> Inventory["Atomic inventory reservation"]
-    Inventory -->|"Reserved"| Order["Order service: 15-minute payment window"]
-    Order --> Payment["Payment"] --> Ticket["Ticket issuance"]
-    Inventory -->|"Sold out"| Waitlist["Waitlist / requeue"]
-```
+![High-level architecture diagram](../assets/diagrams/07-ticket-booking.svg)
 
 **The architecture narrative**: "I use a **queueing room to turn an uncontrollable traffic surge into a controllable, steady flow** — users take a number and enter, instead of all of them hammering the business layer; only admitted requests touch inventory. This one decision solves both overload and fairness (first-come, first-served) at the same time."
 

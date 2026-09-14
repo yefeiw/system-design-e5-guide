@@ -29,15 +29,7 @@ takeaway → two storage worlds: raw events go to the lake (immutable, recompute
 
 ## 4. High-Level Design
 
-```mermaid
-flowchart TB
-    SDK["SDK / frontend"] --> Ingest["Event ingestion API"] --> Kafka["Kafka: impressions and clicks"]
-    Kafka --> Stream["Stream processor: dedup + window aggregation"] --> Realtime["Redis / real-time OLAP"]
-    Kafka --> Batch["Batch processor: exact recomputation + audit"] --> OLAP["OLAP warehouse"]
-    Realtime --> Query["Query service"]
-    OLAP --> Query --> Reports["Reporting / dashboard"]
-    OLAP --> Billing["Billing: exact batch values"]
-```
+![High-level architecture diagram](../assets/diagrams/08-ad-click-aggregator.svg)
 
 **The narrative spine**: "The real-time layer serves ops (minute-level, approximate, recompute-able); the batch layer serves money (hour/day-level, exact, auditable) — **the same data, two timelines**. This is the textbook lambda scenario."
 

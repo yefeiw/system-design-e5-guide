@@ -29,16 +29,7 @@ takeaway → write fan-out's write QPS is ~300x the posting QPS; this is the sou
 
 ## 4. High-Level Design
 
-```mermaid
-flowchart TB
-    Creator["Post creator"] --> PostAPI["Post API"] --> Posts["Post store"]
-    Posts --> Kafka["Kafka fanout event"] --> Fanout["Fanout worker"] --> Timeline["Follower timeline cache"]
-    Graph["Follow graph"] --> Fanout
-    Reader["Feed reader"] --> FeedAPI["Feed API"] --> Timeline
-    FeedAPI -. "Miss / pull path" .-> Merge["Pull merge service"]
-    Graph --> Merge
-    Posts --> Merge
-```
+![High-level architecture diagram](../assets/diagrams/05-news-feed.svg)
 
 ## 5. Data Model
 
