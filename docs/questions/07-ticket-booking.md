@@ -3,11 +3,11 @@
 > Difficulty: Medium ｜ archetype：concurrency resource contention（consistency vs availability）
 > Hello Interview flagged **E5 high-frequency problems**。精髓在于：ticket-grabbing 的瞬间是**strongly consistent 性问题**，其余一切（search、impression、payment）都是干扰项。
 
-## 1. 题目描述
+## 1. Problem Statement
 
 "设计一个 Ticketmaster：user search 活动、seat selection 位（或 ticket-grabbing）、place order + pay。Taylor Swift 级别的开售：50 万人同时抢 5 万张票。"
 
-## 2. 澄清问题
+## 2. Clarifying Questions
 
 | 问题 | intent |
 |------|------|
@@ -17,7 +17,7 @@
 | payment async 吗？ | order state machine 复杂度 |
 | 候补 queue（waitlist）要不要？ | architecture 的第四种答案 |
 
-## 3. 估算推演
+## 3. Estimation Walkthrough
 
 ```
 50 万人开售瞬间涌入；peak request 500K user × 每秒 refresh 1 次 = 500K QPS
@@ -26,7 +26,7 @@ takeaway → 99% 的 traffic（浏览、refresh、query 余票）根本碰不到
        只要把 read 和 write separate，write 冲突其实很小 —— 这个洞察决定整个 architecture
 ```
 
-## 4. 高层设计
+## 4. High-Level Design
 
 ```
 开售前：静态化活动页 + CDN（search/详情 100% cache，零回源）
@@ -47,7 +47,7 @@ takeaway → 99% 的 traffic（浏览、refresh、query 余票）根本碰不到
 
 **architecture 叙事**："我用**queueing 室把不可控的 traffic surge 变成可控的匀速流**——user 拿号入场而不是全量打到 business 层；进场的 request 才碰 inventory。这个决定同时解决了 overload 和 fairness 性（先到先得）两个需求。"
 
-## 5. 数据模型
+## 5. Data Model
 
 ```sql
 events (event_id, venue, onsale_at, total_seats)
@@ -58,7 +58,7 @@ orders (order_id, user_id, event_id, status, expires_at)
 inventory counter: Redis inventory:{event_id}（seat-grab mode 用 counter，seat-selection mode 按 seat 行锁/optimistic locking）
 ```
 
-## 6. 深入分析
+## 6. Deep Dives
 
 ### Deep Dive A · inventory 扣减的 concurrency correctness（主菜）
 
@@ -97,7 +97,7 @@ inventory counter: Redis inventory:{event_id}（seat-grab mode 用 counter，sea
 - 限购（per-user quota，place the order service memory 校验 + 落库 reconciliation）
 - 手机验证码拉开人类 response 节奏
 
-## 7. 常见失分点
+## 7. Red Flags
 
 - 上来讨论 search architecture（审题失败——这题考 consistency 不是考 search）
 - 用 distributed lock 锁整个 event（粒度灾难）而不讨论行级 CAS
@@ -105,7 +105,7 @@ inventory counter: Redis inventory:{event_id}（seat-grab mode 用 counter，sea
 - 没有 payment timeout release 路径
 - 用 zookeeper/etcd leader election 当卖点（解决的是错误的问题）
 
-## 8. 一分钟总结
+## 8. One-Minute Elevator Pitch
 
 "先把 read write separate：静态页全 CDN、余票 read cache 快照（impression 层允许乐观）；traffic surge 用虚拟 queueing 室整流成匀速流再进 place the order。成交层的 correctness 靠每座位一行的 CAS UPDATE（AVAILABLE→HELD→SOLD state machine + 过期 latency queue release + idempotent payment 回调），Redis 预扣只有在单行 hot spot 实测不够时才加，并配 reconciliation fallback。真实冲突量只有 5 万次成功 write，approach matching scale 即可，不 overselling 的证明是'所有成交汇于 SPOF 串行化'。search 和推荐不是本题采分点。"
 

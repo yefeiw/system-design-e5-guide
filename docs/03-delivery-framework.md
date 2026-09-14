@@ -1,12 +1,12 @@
-# 03 · 45 分钟面试推进框架
+# 03 · Delivery Framework: Running the 45 Minutes
 
-> Hello Interview、Design Gurus 与 Alex Xu 的方法看似不同，底层结构其实相近。本章将它们统一为六个阶段，并给出每阶段的表达模板。模板不是让你逐句背诵，而是帮助你在高压下保持清晰的结构和节奏。
+> 各家 framework（Hello Interview、Design Gurus、Alex Xu 4-step method）本质是同一副 skeleton。本章统一成一条 6 阶段 timeline，并给出每阶段的 script templates——template 的作用不是背诵，是让你在高压下不用重新发明 structure。
 
-## 0. 为什么需要一套推进框架
+## 0. 为什么需要 framework
 
 没有 framework 的面试最典型死法：**time sink**。在某一个环节（通常是画图或 deep dive）待了 25 分钟，然后被 interviewer 强行拖走，后面全是赶路，没有一处 deep dive。framework 的本质是**time budget**——每一阶段 timeout 你都要有知觉。
 
-## 1. 六阶段总览
+## 1. six-phase overview
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -21,7 +21,7 @@
 
 > 注意：Phase 3+4 合起来就是经典的「high-level design」；Alex Xu 的 4-step method 把 1+2 merge 为「理解需求」。structure 可以微调，**时间纪律不能破**。
 
-## 2. Phase 1 · 需求澄清（5 分钟）
+## 2. Phase 1 · requirements clarification（5 分钟）
 
 ### must-ask checklist（背下来，每场都过一遍）
 
@@ -49,7 +49,7 @@
 
 **关键动作**：把 interviewer 的回答**write 到 whiteboard 上**。这不是形式——后面每个设计决策你都要回头指它。
 
-## 3. Phase 2 · 确认核心功能（3 分钟）
+## 3. Phase 2 · core feature confirmation（3 分钟）
 
 从需求里**distill 3–5 个 features**，并明确说什么不做：
 
@@ -57,7 +57,7 @@
 
 这一步是 E5 signal 最密集的 30 秒：**convergence = 你知道什么重要**。interviewer 几乎总会说 yes，而这句话已经把「over-engineering」的 risk 提前拆掉了。
 
-## 4. Phase 3 · 高层设计（10 分钟）
+## 4. Phase 3 · high-level design（10 分钟）
 
 画一张 component diagram，包含：client → gateway/LB → stateless service tier → cache → storage →（async）queue → downstream consumer。
 
@@ -68,13 +68,13 @@
 
 API skeleton（可选，30 秒过）：只列 endpoint 名 + 动词，不 write parameter 细节，除非面的是 Product Architecture 轮（见 08 章）。
 
-## 5. Phase 4 · 数据模型（5 分钟）
+## 5. Phase 4 · data model（5 分钟）
 
 - 选 storage：SQL / NoSQL / KV / time-series / search engine——**必须带理由**（见 05 章 selection 表）
 - 画 table schema 或 KV structure：primary key、partition key、secondary index
 - 主动说 shard key 选择和 hot spot risk："我用 user_id 做 partition key，celebrity user 的 partition 会 skew，deep-dive phase 我讲怎么处理"
 
-## 6. Phase 5 · 深入分析（17 分钟）——E5 的主战场
+## 6. Phase 5 · deep dive（17 分钟）——E5 的主战场
 
 ### 怎么选 deep-dive spots
 
@@ -98,7 +98,7 @@ API skeleton（可选，30 秒过）：只列 endpoint 名 + 动词，不 write 
 
 诚实 + 推理 > 硬编。E5 interviewer 阅人无数，编造 100% 被识破。
 
-## 7. Phase 6 · 收尾（5 分钟）
+## 7. Phase 6 · wrap-up（5 分钟）
 
 留出最后 5 分钟（提前看表），主动覆盖：
 
@@ -119,12 +119,12 @@ API skeleton（可选，30 秒过）：只列 endpoint 名 + 动词，不 write 
 | freezing up 30 秒+ | 说出来："我在 A 和 B 之间犹豫，差别是……我倾向 A。" freezing up 沉默才是 fatal 的。 |
 | 时间不够 | "剩下 8 分钟，我想优先把 X 讲完，Y 和 Z 我一句话带过。" interviewer 爱死这种时间感。 |
 
-## 9. 练习方法
+## 9. practice method
 
 1. **template internalize**：拿着 script templates 做 3 道题，之后扔掉 template
 2. **recording retrospective**：手机录屏自己走全流程，重点看——有没有沉默 >10 秒、每个阶段实际用时、interviewer 视角能不能跟上
 3. **live mock**：把 framework 练熟之后再上 [Interviewing.io](https://interviewing.io) 或朋友面，别浪费 live mock 在练 framework 上
 
-## 下一章
+## Next Module
 
 → [04 · Estimation & Numbers to Know](04-estimation-numbers.md)

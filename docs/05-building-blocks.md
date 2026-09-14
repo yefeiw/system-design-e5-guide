@@ -1,6 +1,6 @@
-# 05 · 基础组件
+# 05 · Building Blocks
 
-> 每个组件都分两层讲解：**E4 层**回答“它是什么”；**E5 层**则要求你能说明选型依据、取舍与真实故障场景。后者才需要练到能自然表达。
+> 每个 building block 按两层组织：**E4 层**（知道是什么）一句话带过；**E5 层**（selection 理由 + trade-off + 真实的坑）是你要练到脱口而出的部分。
 
 ## 1. Load Balancer
 
@@ -112,6 +112,6 @@
 
 > "这里我加一层 Redis 做 cache-aside（**是什么**）。因为 read 17K QPS single database 扛不住（**为什么**）。risk 是 invalidation storm，我用 TTL jitter + logical expiration fallback；hit rate 我会作为 core SLI monitoring（**what if it breaks**）。"
 
-## 下一章
+## Next Module
 
 → [06 · Classic Problems Overview](06-classic-questions-overview.md)
