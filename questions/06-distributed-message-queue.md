@@ -3,11 +3,11 @@
 > Difficulty: Medium–Hard ｜ archetype：write-heavy + peak shaving（自己造轮子版）
 > 逆向题——不是"用 Kafka 设计 X"，而是"设计 Kafka 本身"。最考察**storage engine + delivery semantics**的底层功力。
 
-## 1. 题目描述
+## 1. Problem Statement
 
 "设计一个 distributed message queue：producer 发 message，consumer subscription 处理。要高 throughput、不丢 message、支持一个 consumer group 并行消费。"
 
-## 2. 澄清问题
+## 2. Clarifying Questions
 
 | 问题 | intent |
 |------|------|
@@ -17,7 +17,7 @@
 | message 要 retention period？（consume-and-delete vs 按 retention 保留）| **Kafka 与传统 MQ 的 dividing line** |
 | 要不要 transaction message / latency message？| scope control |
 
-## 3. 估算（本题用来论证设计决策）
+## 3. estimation（本题用来论证设计决策）
 
 ```
 1M msg/s × 1KB = 1 GB/s 入流；retention 7 天 = 600TB
@@ -26,7 +26,7 @@ random write 只有 ~100 MB/s → 任何"每 message 一条 record"的设计直�
 takeaway → append-only log（append-only log）不是选择，是物理规律
 ```
 
-## 4. 高层设计
+## 4. High-Level Design
 
 ```
 Producer ──▶ Broker cluster
@@ -42,7 +42,7 @@ Consumer Group：每组每 partition 恰好分配一个 consumer instance
               offset 提交到内部 topic（__consumer_offsets）
 ```
 
-## 5. 数据模型（core 洞察所在）
+## 5. Data Model（core 洞察所在）
 
 ```
 Partition = disk 上的 append-only log file 序列（segment）
@@ -55,7 +55,7 @@ index = 稀疏 index（每 4KB 一条 offset→file position），二分查找�
 2. "消费不删 message，只移动 offset——**消费是 read + 指针**，所以一个 topic 可以被任意多组 consumer 重复消费（Kafka 'consume-and-delete'的 RabbitMQ 的本质区别）"
 3. "partition 是并行度的 atomic 单位：Producer 按 key hash 到 partition（同 key ordered），消费并行度 ≤ partition count——**想清楚 business 要什么级别的 ordered**再定 partition count"
 
-## 6. 深入分析
+## 6. Deep Dives
 
 ### Deep Dive A · 不丢 message 的三段论（must-know）
 
@@ -100,7 +100,7 @@ index = 稀疏 index（每 4KB 一条 offset→file position），二分查找�
 
 "selection 看三个问题：要 throughput 吗？要回放吗？要复杂 routing 吗？"
 
-## 7. 常见失分点
+## 7. Red Flags
 
 - 每条 message 一个 database 行 / 一条 Redis record（没 awareness 到 sequential writes 的物理优势）
 - 说"acks=all 就不丢了"（没提 ISR 收缩）
@@ -108,7 +108,7 @@ index = 稀疏 index（每 4KB 一条 offset→file position），二分查找�
 - 没有 partition 与 ordered 性的讨论
 - 不知道 rebalancing 会 stop-the-world
 
-## 8. 一分钟总结
+## 8. One-Minute Elevator Pitch
 
 "第一性原理是把 random write 变 sequential writes：partition = append-only log + 稀疏 index，message immutable、消费只是移动 offset——因此支持多组重复消费和回放。不丢 message 三段配置：producer acks=all+idempotent retry、broker ISR synchronous replication + min.insync.replicas 拒绝 write、consumer 先消费后提交（at-least-once），需要 exactly-once 时上 transaction + read_committed，但我会先问 business 能不能用 idempotent 消费替代。partition 是并行和 ordered 的 atomic 单位——同 key 同 partition 才 ordered，partition count 即消费并行上限。rebalancing 是 stop-the-world storm，消费端稳定性（GC、长任务）是 queue 稳定性的隐藏约束。"
 

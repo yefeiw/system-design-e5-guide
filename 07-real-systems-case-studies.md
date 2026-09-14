@@ -1,7 +1,7 @@
-# 07 · 真实系统案例研究
+# 07 · Real-World System Case Studies
 
-> 经典题训练的是设计过程，真实案例补足的是现实约束。面试中若能说明“Netflix 实际采用了某种做法，但它同时面对 X 的限制”，就能体现你理解真实工程，而非只会背题。
-> 本章按“读写模式、应记住什么、如何在面试中使用”组织。
+> classic problems 练的是「设计过程」，case studies 补的是「现实约束」。面试里一句"Netflix 实际上是这么做的，但他们的问题是 X"能让 interviewer 立刻把你和背题的人区 separate。
+> 本章按「read vs write + 记什么 + 面试怎么用」组织。
 
 ## 1. 为什么要 read real-world systems
 
@@ -82,6 +82,6 @@
 2. read 的时候只回答三个问题：scale 多大？最难的技术约束是什么？他们牺牲了什么？
 3. 一行笔记存进 repo：`cases.md`（自己的案例库，mock 前翻自己的笔记比翻原文快 10 倍）
 
-## 下一章
+## Next Module
 
 → [08 · Company Style Guide](08-company-guides.md)
