@@ -1,86 +1,86 @@
 # 07 · Real-World System Case Studies
 
-> classic problems 练的是「设计过程」，case studies 补的是「现实约束」。面试里一句"Netflix 实际上是这么做的，但他们的问题是 X"能让 interviewer 立刻把你和背题的人区 separate。
-> 本章按「read vs write + 记什么 + 面试怎么用」组织。
+> The classic problems drill the "design process"; case studies fill in the "real-world constraints." One sentence in an interview — "Netflix actually does it this way, but their problem is X" — instantly separates you from someone who memorized the problem list.
+> This chapter is organized as "read vs. write + what to remember + how to use it in an interview."
 
-## 1. 为什么要 read real-world systems
+## 1. Why read real-world systems
 
-三个 mock 里用得上的理由：
-1. **trade-off 的实锤**：你说"我们选 eventually consistent"，real-world systems 给你"Netflix 的播放许可证就是这么丢的"级别的证据
-2. **scale 的参照系**：知道 Instagram 用 12 台 Postgres 撑过 1000 万 user，你就不会再对 1M DAU 的题疯狂 sharding
-3. **deep dive 的弹药**：interviewer 问"这个 approach 现实中可行吗"，你有第一手故事
+Three reasons that pay off in mocks:
+1. **Hard evidence for your trade-offs**: you say "we chose eventual consistency," and real-world systems hand you evidence at the level of "this is exactly how Netflix loses playback licenses"
+2. **A reference frame for scale**: once you know Instagram ran 10M users on 12 Postgres machines, you'll stop frantically sharding a 1M DAU problem
+3. **Ammunition for the deep dive**: when the interviewer asks "is this approach viable in reality?" you have a first-hand story
 
-## 2. must-read cases（按面试价值 ranking）
+## 2. must-read cases (ranked by interview value)
 
-### 2.1 Netflix（streaming media + elastic cloud 的标杆）
+### 2.1 Netflix (the benchmark for streaming media + elastic cloud)
 
-- **read vs write**：Netflix TechBlog 的 playback architecture、chaos engineering 系列、Evans & OMS（open connect CDN）
-- **记住**：
-  - 全链路**eventually consistent**，availability > consistency：service degradation 时显示旧推荐、旧许可证也没关系，**播放永远不中断**是北极星
-  - 每个 service 配 fallback（静态 response）——"graceful degradation"的工程实现
-  - Chaos Monkey 主动杀 instance 验证 redundancy——operational maturity 的天花板 impression
-- **interview usage**：任何"availability vs consistency"的讨论，"Netflix 把播放中断当最大 SLA 违约，所以全 system eventually consistent + degradation"一句话顶三段论证
+- **read vs. write**: Netflix TechBlog's playback architecture and chaos engineering series; Evans & OMS (Open Connect CDN)
+- **remember**:
+  - **Eventually consistent** end to end, availability > consistency: showing stale recommendations or a stale license during service degradation is fine, and **playback never breaking** is the north star
+  - Every service gets a fallback (a static response) — graceful degradation implemented in engineering terms
+  - Chaos Monkey deliberately kills instances to validate redundancy — the ceiling of operational maturity impressions
+- **interview usage**: in any "availability vs. consistency" discussion, "Netflix treats a playback interruption as its worst SLA violation, so the whole system is eventually consistent + degradation" is one sentence worth three paragraphs of argument
 
-### 2.2 Uber（geolocation + real-time matching）
+### 2.2 Uber (geolocation + real-time matching)
 
-- **read vs write**：Uber Engineering 的 H3 六边形网格、schemaless storage、marketplace matching
-- **记住**：
-  - GeoHash 的精度/boundary 问题 → H3 六边形：等面积、邻居等距、无 boundary 拼接缝
-  - write-heavy read-heavy 的位置流（司机每 4 秒上报）→ 自研 Schemaless（atop MySQL 的 KV sharding）
-  - matching 的 CAP 取舍：供需不平衡时 matching 质量下降但不 denial of service
-- **interview usage**：geolocation 题（打车、外卖、附近的人）的降维打击；H3 的"为什么六边形不是四边形"是最漂亮的 trade-off 微型案例
+- **read vs. write**: Uber Engineering's H3 hexagonal grid, schemaless storage, marketplace matching
+- **remember**:
+  - GeoHash's precision/boundary problems → H3 hexagons: equal area, equidistant neighbors, no boundary seams
+  - A write-heavy, read-heavy location stream (drivers report every 4 seconds) → their in-house Schemaless (KV sharding atop MySQL)
+  - CAP trade-offs in matching: when supply and demand are unbalanced, matching quality degrades but the system doesn't deny service
+- **interview usage**: a dimensionality-reduction weapon for geolocation problems (ride-hailing, food delivery, people nearby); "why hexagons and not squares" is the cleanest micro case study in trade-offs
 
-### 3.3 Instagram（小团队扛大 traffic）
+### 3.3 Instagram (a small team carrying huge traffic)
 
-- **read vs write**：12 台 machine 撑 1000 万 user 的经典博子、Instagram Engineering blogs
-- **记住**：
-  - Postgres sharding + 应用层 routing（shard by user_id）；用 Postgres 的特性玩花样（counter 用 Redis INCR，photo id 按 photo_id sharding 按 user_id query 的二级映射）
-  - **反模式警示**：他们 2012 年的技术 selection（Cassandra 当时太新）证明"无聊技术 + 好 sharding"足够远
-- **interview usage**："scale matching 阶段"的最强论据——over-engineering 的反面教材集
+- **read vs. write**: the classic blog post about 10M users on 12 machines; Instagram Engineering blogs
+- **remember**:
+  - Postgres sharding + application-layer routing (shard by user_id); playing tricks with Postgres features (counters via Redis INCR, photo ids sharded by photo_id with a secondary mapping so queries by user_id still work)
+  - **Anti-pattern warning**: their 2012 technology selection (Cassandra was too new back then) proves that "boring technology + good sharding" goes far enough
+- **interview usage**: the strongest argument for the "scale matching phase" — and a collection of cautionary tales about over-engineering
 
-### 2.4 Meta（social graph + cache 哲学）
+### 2.4 Meta (social graph + cache philosophy)
 
-- **read vs write**：TAO（FB 的 distributed 图 storage）、Facebook 的 cache 层 papers、mcrouter/memcache architecture
-- **记住**：
-  - TAO：社交图 read 是图遍历（一对多的 fan-out read），通用 DB 做不了 → 图专用 cache 层，hit rate 95%+
-  - memcache + mcrouter 的**区域化 cache**（regional pools，跨 DC read local replica、write 走主区域）
-  - look-aside cache + lease 机制解决过期竞态
-- **interview usage**：Feed/社交图/cache deep dive 三合一的弹药库；TAO papers 20 分钟 read 完，性价比极高
+- **read vs. write**: TAO (Facebook's distributed graph storage), Facebook's cache layer papers, mcrouter/memcache architecture
+- **remember**:
+  - TAO: social graph reads are graph traversals (one-to-many fan-out reads) that a general-purpose DB can't do → a graph-specialized cache layer with a 95%+ hit rate
+  - memcache + mcrouter's **regionalized cache** (regional pools; cross-DC reads hit local replicas, writes go to the home region)
+  - Look-aside cache + the lease mechanism to resolve expiration races
+- **interview usage**: the arsenal for Feed/social graph/cache deep dives all at once; the TAO papers take 20 minutes to read and are extremely high value
 
-### 2.5 WhatsApp（radical simplicity）
+### 2.5 WhatsApp (radical simplicity)
 
-- **read vs write**："1M connections per server" 博文（Erlang, FreeBSD）
-- **记住**：50 个工程师 9 亿 user；每 connection memory 压到 KB 级；Erlang actor model 天然映射 long-lived connection session
-- **interview usage**：chat system 题的 capacity 论据（"single machine 1M long-lived connection 是被 WhatsApp 证明过的，所以 10M connection 10 台起步"）
+- **read vs. write**: the "1M connections per server" blog post (Erlang, FreeBSD)
+- **remember**: 50 engineers for 900M users; per-connection memory squeezed down to the KB range; Erlang's actor model maps naturally onto long-lived connection sessions
+- **interview usage**: the capacity argument for chat system problems ("WhatsApp proved a single machine can hold 1M long-lived connections, so 10M connections starts at 10 machines")
 
-### 2.6 classic papers（按性价比 ranking）
+### 2.6 classic papers (ranked by value per minute)
 
-| papers | core 思想 | 面试覆盖 |
+| Papers | Core Idea | Interview Coverage |
 |------|---------|---------|
-| **Amazon Dynamo** | eventually consistent KV、consistent hashing、vector clock、 hinted handoff | 所有 storage 题的母体 |
-| **Google Bigtable** | LSM、wide-column、partition tablets、chubby | Cassandra/HBase 的原理 |
-| **Google MapReduce / GFS** | batch processing 与 distributed 文件 system 原型 | data pipeline 题 |
-| **Kafka papers** | log 即 message system | Q6 的原文出处 |
-| **Spanner** | TrueTime、外部 consistency、全球分布 transaction | strongly consistent 多区域题 |
-| **Raft** | 可理解的 consistency consensus | 被问"leader election 怎么实现"时 |
+| **Amazon Dynamo** | Eventually consistent KV, consistent hashing, vector clock, hinted handoff | The parent of every storage problem |
+| **Google Bigtable** | LSM, wide-column, partitioned tablets, Chubby | The principles behind Cassandra/HBase |
+| **Google MapReduce / GFS** | The prototypes of batch processing and distributed file systems | Data pipeline problems |
+| **Kafka papers** | The log as a messaging system | The source text for Q6 |
+| **Spanner** | TrueTime, external consistency, globally distributed transactions | Strongly consistent multi-region problems |
+| **Raft** | Understandable consistency consensus | When you're asked "how do you implement leader election?" |
 
-> DDIA（Designing Data-Intensive Applications）第 5–6 章几乎覆盖上面全部思想，时间紧就只 read 这两章 + 第 9 章（consistency）。
+> DDIA (Designing Data-Intensive Applications) chapters 5–6 cover almost every idea above; if you're short on time, read just those two chapters plus chapter 9 (consistency).
 
-## 3. 案例怎么"用进"面试
+## 3. How to "use" cases in an interview
 
-**错误用法**（背书式）："Netflix 的 blogs 说过……"——像背的。
+**Wrong usage** (recitation): "Netflix's blog said..." — it sounds memorized.
 
-**正确用法**（论证式）：
+**Right usage** (argument):
 
-> "availability 优先在 streaming media 是被验证过的策略——Netflix 全 system eventually consistent，因为播放中断不可逆而许可证 late 10 秒 imperceptible。我们的 scenario 同样是'read 旧 data imperceptible、denial of service fatal'，所以我做同样取舍。"
+> "Availability-first is a proven strategy in streaming media — Netflix is eventually consistent end to end, because a playback interruption is irreversible while a license arriving 10 seconds late is imperceptible. Our scenario is also 'reading stale data is imperceptible, a denial of service is fatal,' so I'd make the same trade-off."
 
-公式：**他们的约束 → 他们的选择 → 我的约束像不像 → 我的选择**。
+The formula: **their constraint → their choice → does my constraint look like theirs → my choice**.
 
-## 4. 15 分钟/天的案例习惯
+## 4. The 15-minutes-a-day case habit
 
-1. High Scalability 或 engineering blog 挑一篇
-2. read 的时候只回答三个问题：scale 多大？最难的技术约束是什么？他们牺牲了什么？
-3. 一行笔记存进 repo：`cases.md`（自己的案例库，mock 前翻自己的笔记比翻原文快 10 倍）
+1. Pick one post from High Scalability or an engineering blog
+2. While reading, answer only three questions: How big is the scale? What's the hardest technical constraint? What did they sacrifice?
+3. Store a one-line note in your repo: `cases.md` (your own case library — flipping through your notes before a mock is 10x faster than flipping through the originals)
 
 ## Next Module
 

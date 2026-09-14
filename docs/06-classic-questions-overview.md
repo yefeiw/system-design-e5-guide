@@ -1,76 +1,76 @@
 # 06 · Classic Problems Overview
 
-> E5 prep 不需要刷 50 道题。**把 8–10 道题打到「能 deep dive 一层」的程度，比刷 30 道「都画过图」强得多。**
+> You don't need to grind 50 problems to prep for E5. **Taking 8–10 problems to the point where you can deep dive one layer down beats skimming 30 problems where you've "drawn the diagram" for all of them.**
 
-## 1. problem grading（对齐 Hello Interview Difficulty 体系）
+## 1. problem grading (Aligned with the Hello Interview Difficulty Framework)
 
-### Easy（必须无瑕疵）
-- URL shortener（[Q1](questions/01-url-shortener.md)）——考 ID generate、cache、redirect
-- rate limiter（[Q2](questions/02-rate-limiter.md)）——考 algorithmic deep dives + distributed clock
-- Top-K / Heavy Hitters（[Q3](questions/03-top-k-heavy-hitters.md)）——考 streaming algorithm + accuracy trade-off
+### Easy (Must Be Flawless)
+- URL shortener ([Q1](questions/01-url-shortener.md)) — tests ID generation, caching, redirects
+- rate limiter ([Q2](questions/02-rate-limiter.md)) — tests algorithmic deep dives + the distributed clock
+- Top-K / Heavy Hitters ([Q3](questions/03-top-k-heavy-hitters.md)) — tests streaming algorithms + the accuracy trade-off
 
-### Medium（E5 core 火力区）
-- chat system（[Q4](questions/04-chat-system.md)）
-- News Feed（[Q5](questions/05-news-feed.md)）
-- distributed message queue（[Q6](questions/06-distributed-message-queue.md)）
-- Ticket Booking（[Q7](questions/07-ticket-booking.md)）——Hello Interview flagged E5 high-frequency
-- ad click aggregation（[Q8](questions/08-ad-click-aggregator.md)）——E5 high-frequency，流处理全家 bucket
+### Medium (The E5 Core Strike Zone)
+- chat system ([Q4](questions/04-chat-system.md))
+- News Feed ([Q5](questions/05-news-feed.md))
+- distributed message queue ([Q6](questions/06-distributed-message-queue.md))
+- Ticket Booking ([Q7](questions/07-ticket-booking.md)) — flagged by Hello Interview as E5 high-frequency
+- ad click aggregation ([Q8](questions/08-ad-click-aggregator.md)) — E5 high-frequency, the whole stream-processing bucket
 
-### Hard（有余力再碰）
-- Google Drive / Dropbox（文件 storage + 分块 + sync）
-- YouTube / Netflix（videos transcoding pipeline + CDN）
-- Google Maps（分块 index + 路径规划）
-- search engine（爬取 → index → ranking）
-- Uber（geolocation index GeoHash + matching 调度）
+### Hard (Only If You Have Room Left)
+- Google Drive / Dropbox (file storage + chunking + sync)
+- YouTube / Netflix (video transcoding pipeline + CDN)
+- Google Maps (tiled index + route planning)
+- search engine (crawl → index → ranking)
+- Uber (geolocation index via GeoHash + matching and dispatch)
 
-## 2. 题目背后的「archetype」
+## 2. The archetype Behind Every Problem
 
-几乎所有题都是这 5 个 archetype 的 variant，认出 archetype 就认出了考官的采分点：
+Almost every problem is a variant of these five archetypes. Recognize the archetype and you've recognized where the interviewer is scoring:
 
-| archetype | core 矛盾 | 覆盖题目 |
+| archetype | Core tension | Problems it covers |
 |------|---------|---------|
-| **read-heavy + cache** | hit rate vs consistency | short URL、Feed、个人主页 |
-| **write-heavy + peak shaving** | throughput vs latency vs 丢 data | log、click aggregation、message queue |
-| **state sync（long-lived connection）** | connection scale vs push latency | 聊天、协作编辑、游戏 |
-| **concurrency resource contention** | consistency vs availability | ticketing、flash sale、转账 |
-| **Fan-out write amplification** | push-on-write fan-out vs aggregate-on-read | Feed、通知、social graph |
+| **read-heavy + cache** | hit rate vs consistency | short URL, Feed, profile page |
+| **write-heavy + peak shaving** | throughput vs latency vs data loss | logs, click aggregation, message queue |
+| **state sync (long-lived connection)** | connection scale vs push latency | chat, collaborative editing, gaming |
+| **concurrency resource contention** | consistency vs availability | ticketing, flash sale, money transfer |
+| **Fan-out write amplification** | push-on-write fan-out vs aggregate-on-read | Feed, notifications, social graph |
 
-**practice 后期专门练「archetype 迁移」**：拿到没见过的题，先花 30 秒归类 archetype，直接套用 deep-dive repertoire。
+**In the later stage of practice, drill "archetype transfer" specifically**: when you get an unfamiliar problem, spend 30 seconds classifying its archetype, then apply your deep-dive repertoire directly.
 
-## 3. 每道题的 practice workflow（不要反过来！）
+## 3. The practice workflow for Every Problem (Don't Do It Backwards!)
 
 ```
-1. cold-solving（45 min，timed、whiteboard、recording） ← 最重要，禁止先看 walkthrough
-2. 对照 walkthrough（30 min），标记三类差距：
-   □ 流程性差距（忘了问 X / 时间失控）
-   □ 知识性差距（不懂某个组件的原理）
-   □ depth 差距（没挖到 trade-off 层）
-3. write 一页 personal cheat sheet（决策 checklist，不是知识摘要）
-4. 3 天后重做同题（不看 cheat sheet），comparison recording
-5. 一周后讲给朋友听 15 分钟版
+1. cold-solving (45 min, timed, whiteboard, recorded) ← the most important step, never read the walkthrough first
+2. Compare against the walkthrough (30 min) and flag three kinds of gaps:
+   □ Process gaps (forgot to ask X / lost control of the clock)
+   □ Knowledge gaps (don't understand how a component works)
+   □ Depth gaps (never dug down to the trade-off layer)
+3. Write a one-page personal cheat sheet (a decision checklist, not a knowledge summary)
+4. Redo the same problem 3 days later (without the cheat sheet) and record it for comparison
+5. Present a 15-minute version to a friend a week later
 ```
 
-## 4. deep-dive repertoire：每题必备的「pick-one-of-three deep dives」
+## 4. deep-dive repertoire: The "Pick One of Three Deep Dives" Every Problem Needs
 
-面试 deep-dive phase（Phase 5）基本是 interviewer 从这三个方向选一个，提前备好：
+In the interview's deep-dive phase (Phase 5), the interviewer almost always picks one of these three directions, so have all three ready:
 
-- **data 层**：storage selection / shard key / index / consistency
-- **failure 层**：SPOF / overload / 部分 invalidation（split-brain、network partition）
-- **演化层**：traffic ×10 / ×100 之后 architecture 怎么改
+- **Data layer**: storage selection / shard key / index / consistency
+- **Failure layer**: SPOF / overload / partial invalidation (split-brain, network partition)
+- **Evolution layer**: how the architecture changes once traffic goes ×10 / ×100
 
-## 5. 本 repo 的题目 walkthrough structure
+## 5. This Repo's Problem Walkthrough Structure
 
-每道题按统一 structure（和 [03 delivery framework](03-delivery-framework.md) 完全对齐）：
+Every problem follows the same structure (fully aligned with [03 delivery framework](03-delivery-framework.md)):
 
-1. **problem statement**（interviewer 那张模糊的卡片）
-2. **clarifying-questions checklist**（你应该问什么、每个问题的 intent）
-3. **estimation walkthrough**（numbers → takeaway）
-4. **high-level design**（component diagram ASCII + data flow）
+1. **problem statement** (the vague card the interviewer reads from)
+2. **clarifying-questions checklist** (what you should ask and the intent behind each question)
+3. **estimation walkthrough** (numbers → takeaway)
+4. **high-level design** (ASCII component diagram + data flow)
 5. **data model**
-6. **deep dive 1/2/3**（本题最常见的三个 deep dive 方向及 E5 level 的答案）
-7. **red-flag answers**（哪些答案直接暴露不是 E5）
-8. **one-minute elevator pitch**（mock 前的复习卡）
+6. **deep dive 1/2/3** (the three most common deep-dive directions for this problem and the E5-level answers)
+7. **red-flag answers** (answers that immediately reveal you're not E5)
+8. **one-minute elevator pitch** (your review card before a mock)
 
-## 进入题目
+## Getting Into the Problems
 
 → [Q1 · URL shortener](questions/01-url-shortener.md)

@@ -1,106 +1,106 @@
 # 04 · Estimation & Numbers to Know (Back-of-Envelope)
 
-> estimation 的作用不是算准，是**用 numbers 框定设计空间**。E5 面试里一句「按 100M DAU、read/write ratio 100:1，read QPS peak 约 100K，single database MySQL 扛不住，所以这里必须 sharding」值 10 句形容词。
+> The point of estimation isn't to be precise, it's to **use numbers to bound the design space**. In an E5 interview, one sentence — "At 100M DAU and a 100:1 read/write ratio, peak read QPS is about 100K, a single MySQL database can't take that, so this has to be sharded" — is worth ten sentences of adjectives.
 
-## 1. Numbers to Know（先背这张表）
+## 1. Numbers to Know (Memorize This Table First)
 
-### 1.1 latency numbers（Jeff Dean 经典表，2020s 更新版）
+### 1.1 latency numbers (Jeff Dean's Classic Table, 2020s Update)
 
-| 操作 | order of magnitude | 记忆锚点 |
+| Operation | order of magnitude | Memory anchor |
 |------|------|---------|
-| L1 cache 命中 | ~1 ns | — |
-| 互斥锁加锁 | ~15 ns | — |
-| memory random read | ~100 ns | 1 KB data |
-| **SSD random read** | **~150 µs** | 比 memory 慢 1000× |
-| 同机房 RTT | ~0.5 ms | — |
-| **跨可用区 RTT** | **~1–2 ms** | 同区域 |
-| **跨区域 RTT（美东↔美西）** | **~60–80 ms** | 光速物理极限 |
-| HDD 寻道 | ~10 ms | — |
-| sequential reads 1 MB（SSD） | ~1 ms | — |
+| L1 cache hit | ~1 ns | — |
+| Mutex lock acquisition | ~15 ns | — |
+| memory random read | ~100 ns | 1 KB of data |
+| **SSD random read** | **~150 µs** | 1000× slower than memory |
+| RTT within the same datacenter | ~0.5 ms | — |
+| **Cross-AZ RTT** | **~1–2 ms** | Same region |
+| **Cross-region RTT (US East ↔ US West)** | **~60–80 ms** | The speed-of-light physical limit |
+| HDD seek | ~10 ms | — |
+| sequential reads of 1 MB (SSD) | ~1 ms | — |
 
-**面试 killer line**："跨区域一次 RTT 够 memory read 60 万次——这就是为什么多区域 synchronous replication 是最后手段。"
+**Interview killer line**: "One cross-region RTT is long enough for 600,000 memory reads — that's why multi-region synchronous replication is a last resort."
 
 ### 1.2 availability conversion
 
-| 9s | 年停机 | 用法 |
+| 9s | Annual downtime | How to use it |
 |----|--------|------|
-| 99% | 3.65 天 | 不能叫 HA |
-| 99.9% | 8.7 小时 | 一般线上 service 底线 |
-| 99.99% | 52 分钟 | 需要自动 failover |
-| 99.999% | 5 分钟 | 需要消除一切人工介入 |
+| 99% | 3.65 days | You can't call this HA |
+| 99.9% | 8.7 hours | The baseline for an ordinary production service |
+| 99.99% | 52 minutes | Requires automatic failover |
+| 99.999% | 5 minutes | Requires eliminating all manual intervention |
 
-**killer line**："我们说 99.95%，意味着月度预算 22 分钟——每次发布耗 5 分钟的话，发布 failure 最多容忍 4 次。"
+**killer line**: "When we say 99.95%, we mean a monthly budget of 22 minutes — if each deploy burns 5 minutes of it, we can tolerate at most 4 failed deploys."
 
-### 1.3 single-machine capacity 直觉（2020s 硬件）
+### 1.3 single-machine capacity Intuition (2020s Hardware)
 
 | resource | single machine order of magnitude |
 |------|---------|
 | memory | 64–256 GB |
 | SSD | 4–16 TB |
-| 网卡 | 10–25 Gbps ≈ 1–3 GB/s |
-| Web server concurrency connection | ~10K–65K（端口/memory 限制）|
-| 单 MySQL instance 安全 write QPS | ~5K–10K（普通硬件、简单 write）|
-| 单 Redis instance | ~100K ops/s |
-| 单 Kafka broker | ~100K+ msg/s（小 message）|
+| NIC | 10–25 Gbps ≈ 1–3 GB/s |
+| Web server concurrent connections | ~10K–65K (port/memory limits) |
+| Safe write QPS on a single MySQL instance | ~5K–10K (commodity hardware, simple writes) |
+| Single Redis instance | ~100K ops/s |
+| Single Kafka broker | ~100K+ msg/s (small messages) |
 
-**这些 numbers 决定「什么时候必须上 distributed」**——比如 write 入 QPS 估出来 50K，single database 必挂，你就有了 sharding/queue peak shaving 的 numbers 依据。
+**These numbers are what decide when you have to go distributed** — if your write QPS estimate comes out at 50K, a single database is guaranteed to fall over, and now you have the numbers to justify sharding or queue-based peak shaving.
 
-## 2. estimation workflow（4 步，2–3 分钟讲完）
+## 2. estimation workflow (4 Steps, Told in 2–3 Minutes)
 
-1. **user scale** → DAU（题目给的或假设）
-2. **read write QPS** → per-user 操作次数 × DAU ÷ 86400，再 × peak multiplier ×3–5
-3. **storage** → 单条 record 大小 × 日增条数 × retention period（**别忘了 index 和 replica 的放大系数，通常 ×2–3**）
-4. **bandwidth** → QPS × average request/response 大小
+1. **user scale** → DAU (given in the prompt or assumed)
+2. **read write QPS** → per-user operation count × DAU ÷ 86400, then × peak multiplier ×3–5
+3. **storage** → size of one record × records added per day × retention period (**don't forget the index and replica amplification factor, usually ×2–3**)
+4. **bandwidth** → QPS × average request/response size
 
-### 完整示例：URL shortener（题目：100M DAU，per-user 5 次 read 0.1 次 write）
+### Full Example: URL Shortener (Prompt: 100M DAU, 5 reads and 0.1 writes per user)
 
 ```
-read QPS = 100M × 5 / 86400 ≈ 5,800 QPS，peak ×3 ≈ 17K QPS
-write QPS = 100M × 0.1 / 86400 ≈ 115 QPS，peak ≈ 350 QPS
-storage = 500 bytes/条 × 4B 条/年 ≈ 2 TB/年（含 index ×2 ≈ 4 TB）
-bandwidth = 17K × 1 KB ≈ 17 MB/s read 出 —— 很轻
-takeaway → read 需要 cache（17K QPS single database + 每次回源扛不住），write 完全无压力，
-         storage 单 sharding 扛得住 → 这是"read 重 write 轻"的教科书 scenario
+read QPS = 100M × 5 / 86400 ≈ 5,800 QPS, peak ×3 ≈ 17K QPS
+write QPS = 100M × 0.1 / 86400 ≈ 115 QPS, peak ≈ 350 QPS
+storage = 500 bytes/record × 4B records/year ≈ 2 TB/year (with index ×2 ≈ 4 TB)
+bandwidth = 17K × 1 KB ≈ 17 MB/s read out — that's light
+takeaway → reads need a cache (17K QPS won't fit on a single database that also serves every miss), writes are
+           under no pressure at all, storage fits in a single sharding → this is the textbook "read-heavy, write-light" scenario
 ```
 
-注意最后一句：**estimation 必须落到设计 takeaway**。算完不说话等于白算。
+Note that last line: **an estimation has to land on a design takeaway**. Crunching the numbers and saying nothing is the same as not doing them at all.
 
-## 3. E5 级别的 estimation bonus signal
+## 3. E5-Level estimation bonus signal
 
-### 3.1 主动声明假设的 error margin
+### 3.1 State the Error Margin on Your Assumptions
 
-> "DAU 我假设 100M，哪怕差一个 order of magnitude 到 10M，takeaway 不变——因为 bottleneck 在 cache 而不是 database 行数。"（impression estimation 的稳健性思维）
+> "I'm assuming 100M DAU, and even if I'm off by an order of magnitude at 10M, the takeaway doesn't change — because the bottleneck is the cache, not the number of database rows." (the robustness mindset of back-of-the-envelope estimation)
 
-### 3.2 算「钱」
+### 3.2 Do the Money Math
 
-> "storage 4 TB/年，S3 是 $0.023/GB/月，一年 storage cost 不到 $1,200——cost 不是约束。但如果有图片，object storage + CDN 才是大头。"
+> "Storage is 4 TB/year, S3 is $0.023/GB/month, so a year of storage costs under $1,200 — cost isn't the constraint. But if there are images, object storage + CDN is where the real money goes."
 
-### 3.3 算「人」
+### 3.3 Do the "People" Math
 
-大厂 interviewer 喜欢听 capacity planning 落到 operations：
-> "17K QPS peak，单 instance 扛 3K，需要 6 台 + N+2 redundancy ≈ 8 台，一个 ASG 就够了，不需要多区域。"
+Big-tech interviewers like hearing capacity planning land on operations:
+> "17K QPS at peak, one instance carries 3K, so I need 6 instances plus N+2 redundancy ≈ 8 instances, one ASG is enough, no multi-region needed."
 
-## 4. 常见坑
+## 4. Common Pitfalls
 
-| 坑 | 修正 |
+| Pitfall | Fix |
 |----|------|
-| 忘 × peak multiplier（用 average QPS 定 capacity） | average ×3–5 才是 capacity target |
-| 忘 replica 和 index 放大 | storage 直接 ×2–3 |
-| 单位错乱（GB/Gbps/GB/s 混用） | whiteboard 顶上 write checklist 位再动笔 |
-| 估完不落地 | 每个 numbers 后面跟一句"所以……" |
-| exact 到小数 | keep 1–2 significant digits，impression 的是 order of magnitude 思维 |
+| Forgetting the peak multiplier (sizing capacity off average QPS) | average ×3–5 is the real capacity target |
+| Forgetting replica and index amplification | multiply storage by 2–3 up front |
+| Mixing up units (GB / Gbps / GB/s) | write the bit-vs-byte checklist at the top of the whiteboard before you touch the marker |
+| Estimating without landing it | follow every number with a "so therefore..." |
+| Chasing exact decimals | keep 1–2 significant digits; back-of-the-envelope is order-of-magnitude thinking |
 
-## 5. practice checklist（每天 10 分钟，练两周）
+## 5. practice checklist (10 Minutes a Day for Two Weeks)
 
-给这些 scenario 口算 QPS / storage / bandwidth，限时 3 分钟：
+Do QPS / storage / bandwidth in your head for these scenarios, three minutes each:
 
-1. Twitter Feed：200M DAU，per-user 刷 20 次
-2. chat system：50M DAU，per-user 40 条 message，message retain 1 年
-3. videos 站：100M DAU，per-user 30 分钟，average bitrate 2 Mbps
-4. log system：10K server × 每台 100 logs/s × 500 B/log
-5. ad click：1B impressions/day，CTR 1%，click record 200 B
+1. Twitter Feed: 200M DAU, 20 refreshes per user
+2. chat system: 50M DAU, 40 messages per user, messages retained for 1 year
+3. video site: 100M DAU, 30 minutes per user, average bitrate 2 Mbps
+4. log system: 10K servers × 100 logs/s per server × 500 B/log
+5. ad click: 1B impressions/day, 1% CTR, 200 B per click record
 
-答案自己算，重点是把「numbers → 设计 takeaway」的最后一句话练 cost 能。
+Work the answers out yourself. The point is to drill the closing sentence — "numbers → design takeaway" — until it's instinct.
 
 ## Next Module
 

@@ -1,113 +1,113 @@
 # Q7 · Ticket Booking (Flash Sales)
 
-> Difficulty: Medium ｜ archetype：concurrency resource contention（consistency vs availability）
-> Hello Interview flagged **E5 high-frequency problems**。精髓在于：ticket-grabbing 的瞬间是**strongly consistent 性问题**，其余一切（search、impression、payment）都是干扰项。
+> Difficulty: Medium | archetype: concurrency + resource contention (consistency vs availability)
+> Hello Interview flagged this as an **E5 high-frequency problem**. The essence: the moment of ticket-grabbing is a **strong-consistency problem**; everything else (search, impressions, payment) is a distractor.
 
 ## 1. Problem Statement
 
-"设计一个 Ticketmaster：user search 活动、seat selection 位（或 ticket-grabbing）、place order + pay。Taylor Swift 级别的开售：50 万人同时抢 5 万张票。"
+"Design a Ticketmaster: users search events, select seats (or grab tickets), place an order, and pay. A Taylor Swift-scale onsale: 500K people simultaneously fighting for 50K tickets."
 
 ## 2. Clarifying Questions
 
-| 问题 | intent |
+| Question | Intent |
 |------|------|
-| seat-selection mode（specific seat）还是 seat-grab mode（first-come-any-seat）？| 两种 concurrency model 完全不同 |
-| 允许 overselling 吗？（航空公司故意 105%）| **consistency requirement 的定盘星** |
-| place the order 后锁定多久？（购物车持有期）| 锁的粒度和时长 |
-| payment async 吗？ | order state machine 复杂度 |
-| 候补 queue（waitlist）要不要？ | architecture 的第四种答案 |
+| Seat-selection mode (specific seat) or seat-grab mode (first-come, any seat)? | The two concurrency models are completely different |
+| Is overselling allowed? (airlines deliberately sell 105%) | **The anchor for the consistency requirement** |
+| How long is the hold after placing the order? (shopping-cart holding period) | Lock granularity and duration |
+| Is payment async? | Order state machine complexity |
+| Do we need a waitlist? | The architecture's fourth answer |
 
 ## 3. Estimation Walkthrough
 
 ```
-50 万人开售瞬间涌入；peak request 500K user × 每秒 refresh 1 次 = 500K QPS
-可售 inventory：5 万张 —— 真正需要"strongly consistent 竞争"的 write 只有 ≤ 5 万次
-takeaway → 99% 的 traffic（浏览、refresh、query 余票）根本碰不到 inventory，
-       只要把 read 和 write separate，write 冲突其实很小 —— 这个洞察决定整个 architecture
+500K people flood in at the onsale moment; peak requests: 500K users × 1 refresh/s = 500K QPS
+Sellable inventory: 50K tickets — the writes that truly need "strongly consistent contention" number ≤ 50K
+takeaway → 99% of the traffic (browsing, refreshing, querying remaining tickets) never touches inventory.
+       Separate reads from writes and the write conflict is actually tiny — this insight determines the entire architecture
 ```
 
 ## 4. High-Level Design
 
 ```
-开售前：静态化活动页 + CDN（search/详情 100% cache，零回源）
-开售中：
-  user ──▶ queueing gateway（Virtual Waiting Room：ID issuance + 令牌 + heartbeat）
-              │（按批次放行，如每 5 秒放 2000 人）
+Before the onsale: static event pages + CDN (search/detail 100% cached, zero origin traffic)
+During the onsale:
+  user ──▶ queueing gateway (Virtual Waiting Room: ID issuance + token + heartbeat)
+              │ (admit in batches, e.g. 2,000 people every 5 seconds)
               ▼
-          余票 query（Redis cache inventory 快照，second-level refresh）
-              │有余票
+          Remaining-ticket query (Redis inventory snapshot cache, second-level refresh)
+              │ tickets available
               ▼
-          place the order service ──▶ inventory 扣减（atomic 操作，见 deep dive A）
-              │成功 │失败
-              ▼ ▼
-          order 创建（15 min payment window） 重新 queueing/候补
+          Order service ──▶ inventory decrement (atomic operation, see Deep Dive A)
+              │ success        │ failure
+              ▼                ▼
+          Order created (15-min payment window)   re-queue / waitlist
               ▼
-          payment（async 回调）──▶ 出票（座位/票码，write 库，eventually consistent）
+          Payment (async callback) ──▶ ticket issuance (seat/ticket code, written to the store, eventually consistent)
 ```
 
-**architecture 叙事**："我用**queueing 室把不可控的 traffic surge 变成可控的匀速流**——user 拿号入场而不是全量打到 business 层；进场的 request 才碰 inventory。这个决定同时解决了 overload 和 fairness 性（先到先得）两个需求。"
+**The architecture narrative**: "I use a **queueing room to turn an uncontrollable traffic surge into a controllable, steady flow** — users take a number and enter, instead of all of them hammering the business layer; only admitted requests touch inventory. This one decision solves both overload and fairness (first-come, first-served) at the same time."
 
 ## 5. Data Model
 
 ```sql
 events (event_id, venue, onsale_at, total_seats)
-seats (seat_id, event_id, section, row, num, status) -- seat-selection mode core 表
-       status: AVAILABLE → HELD → SOLD / 回 AVAILABLE
+seats (seat_id, event_id, section, row, num, status) -- core table for seat-selection mode
+       status: AVAILABLE → HELD → SOLD / back to AVAILABLE
 orders (order_id, user_id, event_id, status, expires_at)
        status: PENDING → PAID → ISSUED / EXPIRED/CANCELLED
-inventory counter: Redis inventory:{event_id}（seat-grab mode 用 counter，seat-selection mode 按 seat 行锁/optimistic locking）
+inventory counter: Redis inventory:{event_id} (a counter for seat-grab mode; per-seat row locks / optimistic locking for seat-selection mode)
 ```
 
 ## 6. Deep Dives
 
-### Deep Dive A · inventory 扣减的 concurrency correctness（主菜）
+### Deep Dive A · Concurrency correctness of the inventory decrement (the main course)
 
-**approach 谱系（从低到高）**：
+**The approach spectrum, from low to high**:
 
-1. **database optimistic locking**：`UPDATE seats SET status='HELD' WHERE seat_id=? AND status='AVAILABLE'`（CAS semantics，影响行数=1 即成功）
-   - 简单正确；单行 hot spot 下 DB 可能到几千 QPS —— 配合 queueing rate limiting 后**往往就够用了**
-2. **Redis atomic 扣减**：`DECR` / Lua（查+扣 atomic）—— 扛 10 万 QPS
-   - **关键坑：Redis 成功、DB 失败怎么办** → async 落库 + reconciliation；Redis 挂了怎么办（AOF + 快照，最坏丢 second-level inventory state → 恢复时从 DB 全量重建）
-3. **预扣额度到 memory 分段**：inventory 分 100 段，每段独立扣——分散 hot spot，最后一段 merge
-   - 复杂度高，只在单行成为 bottleneck 时才上
+1. **Database optimistic locking**: `UPDATE seats SET status='HELD' WHERE seat_id=? AND status='AVAILABLE'` (CAS semantics; rows affected = 1 means success)
+   - Simple and correct; a single hot row may reach a few thousand QPS on the DB — combined with queueing rate limiting, **this is often enough**
+2. **Redis atomic decrement**: `DECR` / Lua (check + decrement atomically) — sustains 100K QPS
+   - **The key pitfall: what if Redis succeeds but the DB write fails** → async persistence + reconciliation; what if Redis dies (AOF + snapshots; worst case you lose second-level inventory state → fully rebuild from the DB on recovery)
+3. **Pre-deduct inventory into in-memory segments**: split the inventory into 100 segments, each deducted independently — disperses the hot spot; the last segment merges
+   - High complexity; only justified when a single row is the proven bottleneck
 
-**E5 收口**："先算真实冲突量：5 万张票最多 5 万次成功扣减，queueing 后 concurrency write 只有几千 QPS——**单行 optimistic locking 就是正解**，Redis 预扣是过早优化。真正难的不是扛量，是**state machine 的 correctness**。"（impression"approach matching scale"的判断力）
+**The E5 closing**: "First compute the real contention volume: 50K tickets means at most 50K successful decrements, and after queueing, concurrent writes are only a few thousand QPS — **single-row optimistic locking is the right answer**, and pre-deducting in Redis is premature optimization. What's actually hard isn't surviving the load, it's **the correctness of the state machine**." (This shows the "match the approach to the scale" judgment interviewers look for.)
 
-### Deep Dive B · 锁与持有期（seat-selection mode）
+### Deep Dive B · Locks and holding periods (seat-selection mode)
 
-- HELD state + `expires_at`：15 分钟内不 payment auto-release
-- release 路径：定时扫描（慢）→ **latency queue**（Redis ZSet/LevelDB 按到期时间）→ 到期 event 驱动 release
-- "过期 release 必须是 system 的主动行为而不是等 user 动作——否则 scalper 脚本锁座不付款能锁死全场"
+- HELD state + `expires_at`: no payment within 15 minutes → auto-release
+- Release path: scheduled scan (slow) → **delayed queue** (Redis ZSet/LevelDB ordered by expiry time) → expiry event drives the release
+- "Expiry release must be the system's proactive behavior, not something waiting on user action — otherwise a scalper script can lock up the entire venue with seats it never pays for."
 
-### Deep Dive C · payment 的 eventually consistent
+### Deep Dive C · Payment's eventual consistency
 
-- order state machine：PENDING → PAID → ISSUED，每个转换 idempotent（payment 回调会 retry）
-- payment 成功但出票失败：reconciliation 任务扫 PENDING_PAID → 补偿（退款 or 人工）
-- "payment gateway 回调至少 delivery 一次，我的 state 迁移必须 idempotent：`UPDATE orders SET status='PAID' WHERE order_id=? AND status='PENDING'`——又是 CAS。"
+- Order state machine: PENDING → PAID → ISSUED, every transition idempotent (payment callbacks will retry)
+- Payment succeeded but issuance failed: a reconciliation job scans PENDING_PAID → compensation (refund or manual intervention)
+- "The payment gateway delivers its callback at least once, so my state transitions must be idempotent: `UPDATE orders SET status='PAID' WHERE order_id=? AND status='PENDING'` — CAS again."
 
-### Deep Dive D · 不 overselling 的形式化论证
+### Deep Dive D · The formal argument for no overselling
 
-被问"你怎么保证绝对不 overselling"：
-> "所有路径汇到同一个串行点：每个 seat 行的 CAS。Redis 快照可以 stale（显示有余票但 place the order 失败 → 提示 retry，user 体验问题，不是 correctness 问题）；**impression 层允许乐观，成交层绝对悲观**。不 overselling 的证明 = 所有成交都过了那一条 CAS UPDATE。"
-（"impression 乐观、成交悲观"这句话本身就是 E5 level 的总结）
+When asked "how do you guarantee absolutely no overselling":
+> "Every path converges on the same serialization point: a CAS on each seat row. The Redis snapshot is allowed to be stale (it shows tickets available, the order fails → prompt a retry; that's a UX problem, not a correctness problem); **the impression layer stays optimistic, the transaction layer stays absolutely pessimistic**. The proof of no overselling = every sale passed through that one CAS UPDATE."
+("Optimistic at the impression layer, pessimistic at the transaction layer" — this sentence alone is E5-level synthesis.)
 
-### Deep Dive E · anti-scalper（加 partition）
+### Deep Dive E · Anti-scalper (bonus points)
 
-- 设备指纹 + 账号风控前置（进 queueing 室之前过滤）
-- 限购（per-user quota，place the order service memory 校验 + 落库 reconciliation）
-- 手机验证码拉开人类 response 节奏
+- Device fingerprinting + account risk checks up front (filtered before entering the queueing room)
+- Purchase limits (per-user quota, validated in the order service's memory + reconciled against the store)
+- SMS verification codes to stretch out the human response rhythm
 
 ## 7. Red Flags
 
-- 上来讨论 search architecture（审题失败——这题考 consistency 不是考 search）
-- 用 distributed lock 锁整个 event（粒度灾难）而不讨论行级 CAS
-- Redis 扣 inventory 但不讲 DB consistency
-- 没有 payment timeout release 路径
-- 用 zookeeper/etcd leader election 当卖点（解决的是错误的问题）
+- Opening with search architecture (misreading the problem — this tests consistency, not search)
+- Using a distributed lock on the entire event (granularity disaster) without discussing row-level CAS
+- Decrementing inventory in Redis without addressing DB consistency
+- No payment-timeout release path
+- Pitching ZooKeeper/etcd leader election (solves the wrong problem)
 
 ## 8. One-Minute Elevator Pitch
 
-"先把 read write separate：静态页全 CDN、余票 read cache 快照（impression 层允许乐观）；traffic surge 用虚拟 queueing 室整流成匀速流再进 place the order。成交层的 correctness 靠每座位一行的 CAS UPDATE（AVAILABLE→HELD→SOLD state machine + 过期 latency queue release + idempotent payment 回调），Redis 预扣只有在单行 hot spot 实测不够时才加，并配 reconciliation fallback。真实冲突量只有 5 万次成功 write，approach matching scale 即可，不 overselling 的证明是'所有成交汇于 SPOF 串行化'。search 和推荐不是本题采分点。"
+"First, separate reads from writes: static pages fully on CDN, remaining-ticket reads from a cache snapshot (the impression layer is allowed to be optimistic); a virtual queueing room turns the traffic surge into a steady flow before orders are placed. The transaction layer's correctness rests on a per-seat CAS UPDATE (the AVAILABLE→HELD→SOLD state machine + delayed-queue expiry release + idempotent payment callbacks); Redis pre-deduction is added only when a single hot row is measurably insufficient, and always with a reconciliation fallback. The real contention volume is only 50K successful writes — match the approach to the scale; the proof of no overselling is 'every sale converges on a single serialized point.' Search and recommendations earn no points on this problem."
 
 ---
-← [Q6 message queue](06-distributed-message-queue.md) ｜ [Q8 ad click aggregation →](08-ad-click-aggregator.md)
+← [Q6 message queue](06-distributed-message-queue.md) | [Q8 ad click aggregation →](08-ad-click-aggregator.md)

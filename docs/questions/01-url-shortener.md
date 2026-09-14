@@ -1,55 +1,55 @@
 # Q1 · URL Shortener
 
-> Difficulty: Easy ｜ archetype：read-heavy + cache
-> 看似简单，其实是**把「ID generate」「cache」「redirect 链路」三个 deep-dive spots 打穿**的最佳练手题。
+> Difficulty: Easy | archetype: read-heavy + cache
+> Looks simple, but it's actually the **best warm-up problem for drilling through three deep-dive spots: ID generation, caching, and the redirect path**.
 
 ## 1. Problem Statement
 
-"设计一个类似 bit.ly 的 URL shortener。user 提交长 URL，得到一个 short URL 接，访问 short URL 接跳转到原 URL。"
+"Design a URL shortener like bit.ly. A user submits a long URL and gets back a short URL; visiting the short URL redirects to the original URL."
 
 ## 2. Clarifying Questions
 
-| 问题 | 为什么问 |
+| Question | Why ask it |
 |------|---------|
-| short URL 需要自 definitions 别名吗？（`bit.ly/my-wedding`）| 影响 ID generate 的整个设计 |
-| 链接过期吗？永久有效？ | storage estimation 和 cleanup strategy |
-| 需要 click 统计吗（分析 feature）？ | **这题最大的隐藏需求**——决定要不要 write 入 click log pipeline |
-| DAU / read write 字数级？ | 决定 cache 层必要性 |
-| read latency requirement？（301 vs 302 的意义）| impression HTTP 细节的机会 |
+| Does the short URL need a custom alias? (`bit.ly/my-wedding`) | Affects the entire ID generation design |
+| Do links expire, or are they permanent? | Storage estimation and cleanup strategy |
+| Do we need click counting (an analytics feature)? | **The biggest hidden requirement in this problem**—it decides whether clicks are written into a log pipeline |
+| DAU / read and write volume? | Determines whether a cache layer is necessary |
+| Read latency requirement? (the meaning of 301 vs 302) | Your opening to get into HTTP details |
 
-**scope convergence script**："我聚焦创建/read 取/redirect 三个 core feature + click counter；自 definitions 域名和过期管理放到 follow-up。"
+**Scope convergence script**: "I'll focus on the three core features—create, read, and redirect—plus the click counter; custom domains and expiration management go to follow-up."
 
-## 3. Estimation Walkthrough（假设 100M DAU，per-user 5 read 0.1 write）
+## 3. Estimation Walkthrough (assume 100M DAU, 5 reads and 0.1 writes per user)
 
 ```
-read QPS ≈ 5,800（peak ~17K） write QPS ≈ 115
-storage ≈ 500B × 4B 条/年 ≈ 2TB/年（含 index ×2 = 4TB）
-bandwidth ≈ 17K × 1KB ≈ 17MB/s（轻）
-takeaway → read path 必须 cache；write 和 storage 毫无压力 → 单 write-heavy read 教科书 scenario
+read QPS ≈ 5,800 (peak ~17K)   write QPS ≈ 115
+storage ≈ 500B × 4B records/year ≈ 2TB/year (with index ×2 = 4TB)
+bandwidth ≈ 17K × 1KB ≈ 17MB/s (light)
+takeaway → the read path must be cached; writes and storage are under no pressure at all → a textbook read-heavy scenario
 ```
 
 ## 4. High-Level Design
 
 ```
-client ──POST /url──▶ LB ──▶ URL shortener（stateless）──▶ ID generate 器
+client ──POST /url──▶ LB ──▶ URL shortener (stateless) ──▶ ID generator
                                    │
                                    ▼
-                                MySQL（主从）
+                                MySQL (primary/replica)
 client ──GET /abc123──▶ LB ──▶ URL shortener ──▶ Redis cache ──(miss)──▶ MySQL
                                    │
                                    ▼
-                              return 301/302 + 原 URL
-（click event ──▶ Kafka ──▶ 分析 pipeline，若题目要统计）
+                              return 301/302 + original URL
+(click event ──▶ Kafka ──▶ analytics pipeline, if the problem asks for counting)
 ```
 
-data flow 口述版："创建走 service tier 拿唯一 ID、编码成短码、write 主库；访问走 cache 优先，miss 回源并回填。"
+Data flow, spoken version: "Creation goes through the service tier to get a unique ID, encodes it into a short code, and writes to the primary DB; access goes to the cache first, and on a miss it goes back to the source and backfills."
 
 ## 5. Data Model
 
 ```sql
--- MySQL 即可（strongly consistent + transaction + 单表 index 简单）
-short_url (id BIGINT PK, -- global auto-increment 或 Snowflake ID
-           code VARCHAR(7) UNIQUE,-- base62 编码
+-- MySQL is enough (strongly consistent + transactions + simple single-table indexes)
+short_url (id BIGINT PK, -- global auto-increment or Snowflake ID
+           code VARCHAR(7) UNIQUE,-- base62 encoding
            original_url TEXT,
            created_by BIGINT,
            expires_at TIMESTAMP NULL,
@@ -57,47 +57,47 @@ short_url (id BIGINT PK, -- global auto-increment 或 Snowflake ID
 INDEX (created_by), INDEX (expires_at)
 ```
 
-**为什么 SQL 不是 DynamoDB**："write 只有百级 QPS，关系型毫无压力，且过期 cleanup、按 user query 都要灵活 index——引入 KV 反而丢失这些。scale 撑死 single database + read write 分离。"
+**Why SQL and not DynamoDB**: "Writes are only in the hundreds of QPS, so a relational database is under no pressure at all, and expiration cleanup plus per-user queries both need flexible indexes—bringing in a KV store would actually lose those. At most this scales to a single database with read/write separation."
 
 ## 6. Deep Dives
 
-### Deep Dive A · ID 怎么 generate（本题经典）
+### Deep Dive A · How to generate IDs (the classic part of this problem)
 
-| approach | 优点 | 缺点 / E5 必须说出来 |
+| Approach | Pros | Cons / what an E5 must say out loud |
 |------|------|---------------------|
-| DB auto-increment ID | 简单、无冲突 | SPOF；暴露总数（爬虫可枚举你的量）；分库后要步长分段 |
-| UUID | 无协调 | 128 位太长、无序（B+ 树页分裂）→ 短码 scenario 直接排除 |
-| **号段模式（Leaf/美团）** | DB 只发段，扛高 write | 号段 service 要 HA；段内 monotonic |
-| Snowflake Snowflake | 趋势递增、去中心化 | **clock 回拨**问题；machine 位要规划 |
+| DB auto-increment ID | Simple, no collisions | SPOF; exposes the total count (crawlers can enumerate your volume); after sharding you need step-based ranges |
+| UUID | No coordination | 128 bits is too long and unordered (B+ tree page splits) → ruled out immediately for a short-code scenario |
+| **Segment mode (Leaf / Meituan)** | The DB only hands out segments, so it absorbs high write volume | The segment service needs HA; monotonic only within a segment |
+| Snowflake | Roughly increasing, decentralized | The **clock rollback** problem; machine bits need planning |
 
-E5 standard answers："write QPS 才 115，我选 DB auto-increment + 号段 cache 就够——为一个低频 write 引入 Snowflake 的时间位纯属 over-engineer。如果题改成十亿级 write，我会换 Snowflake 并处理 clock 回拨（等待/报错/备份位）。"
+E5 standard answer: "Write QPS is only 115, so I'll take DB auto-increment plus a segment cache and that's enough—introducing Snowflake's timestamp bits for a low-frequency write is pure over-engineering. If the problem changed to billion-scale writes, I'd switch to Snowflake and handle clock rollback (wait, error out, or reserve backup bits)."
 
-### Deep Dive B · Base62 与碰撞
+### Deep Dive B · Base62 and collisions
 
-- 62^7 ≈ 3.5 万亿，7 位编码足够
-- auto-increment ID → base62 **天然无碰撞**（这是选 auto-increment 的隐藏红利，说出来是加分）
-- 若 hash 取前 7 位 → 必须处理碰撞（查库 retry）→ 讲得出"所以我不选 hash"是 trade-off 表达
+- 62^7 ≈ 3.5 trillion, so 7 characters of encoding is plenty
+- auto-increment ID → base62 is **collision-free by construction** (this is the hidden dividend of choosing auto-increment, and saying it out loud earns you points)
+- If you take the first 7 characters of a hash → you must handle collisions (look up the DB and retry) → being able to say "that's why I don't choose hashing" is how you demonstrate trade-off reasoning
 
-### Deep Dive C · 301 vs 302 与 cache
+### Deep Dive C · 301 vs 302 and caching
 
-> "301 永久 redirect 会被浏览器 cache——**后续 click 不再到我们 server，click 统计就废了**。要统计就 302 临时 redirect，cost 是每次都回源，read 压力全在我们这。所以这个选择取决于 business 更在乎统计准确还是 response latency。"
+> "A 301 permanent redirect gets cached by the browser—**subsequent clicks never reach our servers, so click counting is dead**. If you want the counts, use a 302 temporary redirect; the cost is that every request comes back to the origin, so all the read pressure lands on us. So the choice comes down to whether the business cares more about counting accuracy or response latency."
 
-这一段是本题最 E5 的 30 秒。
+This paragraph is the most E5 thirty seconds of this problem.
 
 ### Deep Dive D · hot spot
 
-"热门 short URL（病毒传播）单 key 会被打到单个 Redis sharding → local cache（in-process LRU）做第一层 + logical expiration 防 stampede。"
+"A popular short URL (going viral) hammers a single key on a single Redis shard → use a local cache (in-process LRU) as the first tier plus logical expiration to prevent a stampede."
 
 ## 7. Red Flags
 
-- 上来就"sharding 128 个库"（write 115 QPS 分什么）
-- 用 hash + 不谈碰撞处理
-- 只说"加 Redis"，不谈 hit rate/invalidation 策略/hot spot
-- 301/302 的统计问题没 awareness（被 interviewer 点破后才反应）
+- Opening with "shard it across 128 databases" (sharding what—115 QPS of writes?)
+- Using hashing without discussing collision handling
+- Only saying "add Redis," without discussing hit rate, invalidation strategy, or hot spots
+- No awareness of the 301/302 counting problem (only reacting after the interviewer points it out)
 
 ## 8. One-Minute Elevator Pitch
 
-"read/write ratio 1000:1，write 走 DB auto-increment + base62 编码天然无碰撞；read 走 Redis cache-aside + in-process 二级 cache 扛 hot spot；301 vs 302 取决于要不要 click 统计——要统计就得 302 回源，那就把 cache hit rate 做成 core SLI。click log async 进 Kafka 做分析。storage order of magnitude 2TB/年，single database 主从足够，不为这个 scale 引入任何 distributed 组件。"
+"The read/write ratio is 1000:1. Writes go through DB auto-increment plus base62 encoding, which is collision-free by construction; reads go through Redis cache-aside plus an in-process second-level cache to absorb hot spots. 301 vs 302 depends on whether we need click counting—if we do, we have to use 302 and hit the origin, which makes cache hit rate a core SLI. Click logs go to Kafka asynchronously for analytics. Storage is on the order of 2TB per year, so a single database with a primary and replicas is enough, and I won't introduce any distributed component at this scale."
 
 ---
-← [06 classic problems overview](../06-classic-questions-overview.md) ｜ [Q2 rate limiter →](02-rate-limiter.md)
+← [06 classic problems overview](../06-classic-questions-overview.md) | [Q2 rate limiter →](02-rate-limiter.md)

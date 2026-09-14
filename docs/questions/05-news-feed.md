@@ -1,114 +1,114 @@
 # Q5 · News Feed
 
-> Difficulty: Medium ｜ archetype：Fan-out write amplification + read-heavy
-> Meta 系最爱。**Push vs Pull 的混合 approach**是主轴，consistency 细节是 E5 区分度。
+> Difficulty: Medium | archetype: Fan-out write amplification + read-heavy
+> A Meta favorite. **The hybrid push vs pull approach** is the main axis, and the consistency details are what differentiate you at E5.
 
 ## 1. Problem Statement
 
-"设计 Facebook/Twitter 的 News Feed：user posting、follow 别人、刷到自己 follow 者的 timeline Feed。"
+"Design the news feed for Facebook/Twitter: users post, follow other users, and scroll through a feed of posts from the people they follow."
 
 ## 2. Clarifying Questions
 
-| 问题 | intent |
+| Question | Intent |
 |------|------|
-| Feed ranking：time order 还是 algorithm ranking？ | 决定要不要 ranking service（本题先按 time order，ranking 提一句）|
-| follow 上限多少？（follow 300 人 vs 100 万人）| **Push/Pull 的 dividing line** |
-| followers structure 里有没有 celebrity user（百万人 follow）？| 同上，hot spot 问题的根源 |
-| 新 Feed 的 refresh semantics？ | read-your-writes / eventually consistent 的选择题 |
-| 要不要支持"推文浏览数"这类轻互动？ | write 入 storm variant |
+| Feed ranking: time order or algorithmic ranking? | Decides whether you need a ranking service (this problem assumes time order; mention ranking in one line) |
+| What is the follow limit? (300 follows vs 1 million followers) | **The dividing line between push and pull** |
+| Are there celebrity users in the follower graph (millions of followers)? | Same as above — the root cause of the hot spot problem |
+| What are the refresh semantics for a new feed? | The read-your-writes vs eventual consistency choice |
+| Do we need lightweight interactions like view counts? | Adds a write-side storm variant |
 
 ## 3. Estimation Walkthrough
 
 ```
-100M DAU；per-user follow 300 人、日发 2 帖、刷 20 次
-write：200M posts/day ≈ 2.3K posts/s，peak 10K/s
-read：2B feed request/day ≈ 23K QPS average，peak 100K+ QPS ← read 是 write 的 20 倍
-write fan-out cost：一篇帖 × follow 者 average 300 = average 600K feed-item write/s（peak 3M/s）
-takeaway → write fan-out 的 write QPS 是 posting QPS 的 ~300 倍，这就是本题全部矛盾的来源
+100M DAU; each user follows 300 people, posts 2 per day, refreshes 20 times
+write: 200M posts/day ≈ 2.3K posts/s, peak 10K/s
+read: 2B feed requests/day ≈ 23K QPS average, peak 100K+ QPS ← reads are 20x writes
+write fan-out cost: 1 post × average 300 followers = average 600K feed-item writes/s (peak 3M/s)
+takeaway → write fan-out's write QPS is ~300x the posting QPS; this is the source of every tension in this problem
 ```
 
 ## 4. High-Level Design
 
 ```
-posting：client ──▶ Post API ──▶ 帖子 service ──▶ 帖子库（Post Store, Cassandra/sharding）
+posting: client ──▶ Post API ──▶ Post Service ──▶ Post Store (Cassandra/sharding)
                                         │
                                         ▼
-                              Kafka（fanout event）
+                              Kafka (fan-out event)
                                         │
                               ┌─────────┴─────────┐
                               ▼ ▼
-                     Fanout Worker（push 路线） follow 图谱 service（Graph）
-                       给每个 followers 的 feed cache
-                       追加 post_id │
+                     Fanout Worker (push path)   Follow Graph Service
+                       append post_id to each    (Graph)
+                       follower's feed cache     │
                               │ │
                               ▼ ▼
-刷 Feed：Feed API ──▶ user Feed Cache（Redis List，推的 timeline）
-                       │（cache miss / 混合路线）
-                       └──▶ Feed 现场组装（pull）：查 follow 列表 → 批量拉对方近期帖子 → 归并
+Feed refresh: Feed API ──▶ User Feed Cache (Redis List, the pushed timeline)
+                       │ (cache miss / hybrid path)
+                       └──▶ On-the-fly feed assembly (pull): look up follow list → batch-fetch recent posts → merge
 ```
 
 ## 5. Data Model
 
 ```
-posts (post_id PK, user_id, content, media_refs, created_at) -- sharding：post_id
-follows (follower_id, followee_id, created_at) -- 边表，sharding：follower_id
-            （倒排表 followees_of:{user} 用于 pull；正排 followers_of:{user} 用于 push）
-feed_cache: Redis List per user（存 post_id，长度封顶如 800）
-inbox (user_id, last_read_post_id) -- 游标
+posts (post_id PK, user_id, content, media_refs, created_at) -- sharding: post_id
+follows (follower_id, followee_id, created_at) -- edge table, sharding: follower_id
+            (inverted list followees_of:{user} for pull; forward list followers_of:{user} for push)
+feed_cache: Redis List per user (holds post_ids, capped at e.g. 800)
+inbox (user_id, last_read_post_id) -- cursor
 ```
 
 ## 6. Deep Dives
 
-### Deep Dive A · Push vs Pull vs 混合（主菜）
+### Deep Dive A · Push vs Pull vs Hybrid (the main course)
 
-| | Push（write fan-out）| Pull（read fan-out）|
+| | Push (fan-out on write) | Pull (fan-out on read) |
 |---|---|---|
-| read latency | 极低（cache 现成）| 高（on-the-fly aggregation 300 人的帖子）|
-| write amplification | 巨大（×average followers 数）| 无 |
-| storage | 每人一份 feed replica | 无 replica |
-| 新帖可见性 | async latency（second-level）| 立即 |
-| celebrity user | **灾难**（一条帖 write 100 万次）| 天然免疫 |
+| Read latency | Extremely low (cache is pre-built) | High (on-the-fly aggregation of 300 people's posts) |
+| Write amplification | Enormous (× average follower count) | None |
+| Storage | A feed replica per user | No replica |
+| New post visibility | Async latency (seconds) | Immediate |
+| Celebrity users | **Disaster** (one post = 1 million writes) | Naturally immune |
 
-E5 standard answers——**混合**：
-- 普通 user（followers < 阈值如 10K）：push 预算进 followers cache
-- celebrity user：不扩散，**pull 时现场 merge**（feed API return = cache 里的普通帖 + online pull 的 celebrity user 帖，按时间归并）
-- "阈值是可调 parameter，按 fanout worker 的消费 latency monitoring 调——**把 system 行为和 operations 指标挂钩**才是完整设计。"
+The E5 answer — **hybrid**:
+- Regular users (followers below a threshold, e.g. 10K): push into followers' caches within budget
+- Celebrity users: no fan-out; **merge on the fly at read time** (feed API response = regular posts from cache + celebrity posts pulled online, merged by time)
+- "The threshold is a tunable parameter, adjusted by monitoring the fanout workers' consumption latency — **tying system behavior to operational metrics** is what makes a complete design."
 
-### Deep Dive B · consistency：发完帖 refresh 看不到（Meta 爱问）
+### Deep Dive B · Consistency: you post, refresh, and don't see it (Meta loves this)
 
-scenario：user A posting → message 还在 Kafka → A 立刻 refresh Feed。
-- approach 1：**read-your-own-writes**——Feed API 检查 `inbox.last_read`，若 user 自己有未进 cache 的最新帖，从帖子库直接拼上
-- approach 2：posting API sync write 自己的 feed cache（自己必然是自己的 followers……不是），至少 sync write 自己的"主页 timeline"
-- script："对外人，eventually consistent second-level convergence 完全 acceptable；对作者本人，人类对'我发的东西立刻可见'零容忍——**consistency 预算按 user 关系分配**，这是产品的心理学，不只是技术。"
+Scenario: user A posts → the message is still in Kafka → A immediately refreshes the feed.
+- Approach 1: **read-your-own-writes** — the Feed API checks `inbox.last_read`; if the user's own latest post hasn't landed in the cache yet, splice it in directly from the post store
+- Approach 2: the posting API synchronously writes the user's own feed cache (you are always your own follower... no you aren't) — at minimum, synchronously write your own "profile timeline"
+- Script: "For everyone else, eventually consistent second-level convergence is perfectly acceptable; for the author themselves, humans have zero tolerance for 'what I just posted isn't visible' — **allocate your consistency budget per user relationship**. That's product psychology, not just technology."
 
-### Deep Dive C · Feed Cache 细节
+### Deep Dive C · Feed cache details
 
-- structure：Redis List of post_id，LPUSH 新帖 + LTRIM 封顶（800 条，翻页深处回源帖子库）
-- 翻页游标：`(last_post_id, offset)` 双 parameter——"纯 offset 在有新帖 write 入时会跳条/重复，cursor 必须锚定 post_id"
-- cache 未命中（冷 user）：现场 pull 组装 + 回填
-- hot spot user Feed cache sharding：按 user_id consistent hashing
+- Structure: Redis List of post_ids; LPUSH new posts + LTRIM to cap the list (800 entries; deep pagination falls back to the post store)
+- Pagination cursor: the `(last_post_id, offset)` dual parameter — "a pure offset skips or duplicates items when new posts are written in; the cursor must be anchored to a post_id"
+- Cache miss (cold user): assemble on the fly via pull, then backfill
+- Hot-spot user feed cache sharding: consistent hashing on user_id
 
-### Deep Dive D · 删帖与编辑的传播
+### Deep Dive D · Propagating deletions and edits
 
-Push model 的隐藏债务：**删帖要从所有 followers 的 cache 里抠掉**。
-- feed cache 存 post_id 而不是内容 → 删帖只需在帖子库打 tombstone，read 侧渲染时过滤 invalidation 帖（惰性删除）
-- "存 ID 不存内容，把内容 convergence 到单一来源（Single Source of Truth），cache 才敢大"——这是 push model 能活下来的前提
+The push model's hidden debt: **deleting a post means removing it from every follower's cache**.
+- The feed cache stores post_ids, not content → deleting a post only requires a tombstone in the post store; the read side filters out invalidated posts at render time (lazy deletion)
+- "Store IDs, not content — converge content to a single source of truth, and only then can the cache afford to be big." That's the precondition that keeps the push model alive.
 
-### Deep Dive E · ranking（一句话级别）
+### Deep Dive E · Ranking (one sentence)
 
-"真实产品是 algorithm ranking（互动预测分），那会把 feed 组装变成**candidates 检索 + 打分**两段式（recall 几百条 → 轻量 model 打分取几十条），architecture 主体不变，加一个 ranking service。今天我先做时间轴。"
+"Real products use algorithmic ranking (predicted engagement score), which turns feed assembly into a two-stage **candidate retrieval + scoring** pipeline (recall a few hundred → a lightweight model scores them down to a few dozen). The core architecture doesn't change; you add a ranking service. Today I'll build the chronological timeline."
 
 ## 7. Red Flags
 
-- 纯 push 且没讨论 celebrity user write amplification
-- 纯 pull 且没算 300 人 on-the-fly aggregation 的 read latency
-- feed cache 存帖子全文（删帖/编辑灾难）
-- read-your-own-writes 没 awareness（被 interviewer 问"你自己发的刷不到"才反应）
-- pagination 用纯 offset
+- Pure push with no discussion of celebrity-user write amplification
+- Pure pull with no math on the read latency of on-the-fly aggregation across 300 people
+- Feed cache stores full post content (deletion/edit disaster)
+- No awareness of read-your-own-writes (only reacts when the interviewer asks "your own post doesn't show up")
+- Pagination uses a pure offset
 
 ## 8. One-Minute Elevator Pitch
 
-"read 是 write 的 20 倍，core 矛盾是 fan-out write amplification。混合 approach：普通 user push——帖子经 Kafka 进 fanout worker write 进各 followers 的 Redis feed cache（存 post_id 不存内容，删帖走 tombstone 惰性过滤）；celebrity user 不扩散，read 时现场 pull 归并，阈值按 fanout 消费 latency 调。consistency tiered：对外人 eventually consistent，对作者本人 read-your-own-writes sync 拼入。pagination 用 post_id 锚定的 cursor。algorithm ranking 是把 assembly layer 换成 recall+打分两段式，architecture skeleton 不变。"
+"Reads are 20x writes, and the core tension is fan-out write amplification. Hybrid approach: regular users get push — the post flows through Kafka into fanout workers that write into each follower's Redis feed cache (storing post_ids, not content, so deletions go through lazy tombstone filtering); celebrity users get no fan-out and are pulled and merged on the fly at read time, with the threshold tuned by fanout consumption latency. Consistency is tiered: eventual consistency for everyone else, read-your-own-writes spliced in synchronously for the author. Pagination uses a cursor anchored on post_id. Algorithmic ranking replaces the assembly layer with a two-stage recall + scoring pipeline; the architecture skeleton doesn't change."
 
 ---
-← [Q4 chat system](04-chat-system.md) ｜ [Q6 message queue →](06-distributed-message-queue.md)
+← [Q4 chat system](04-chat-system.md) | [Q6 message queue →](06-distributed-message-queue.md)

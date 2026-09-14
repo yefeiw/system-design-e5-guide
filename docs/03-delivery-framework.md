@@ -1,129 +1,129 @@
 # 03 · Delivery Framework: Running the 45 Minutes
 
-> 各家 framework（Hello Interview、Design Gurus、Alex Xu 4-step method）本质是同一副 skeleton。本章统一成一条 6 阶段 timeline，并给出每阶段的 script templates——template 的作用不是背诵，是让你在高压下不用重新发明 structure。
+> Every framework out there (Hello Interview, Design Gurus, Alex Xu's 4-step method) is fundamentally the same skeleton. This chapter unifies them into a single 6-phase timeline and provides script templates for each phase — the templates are not for memorization; they exist so that under pressure you don't have to reinvent the structure.
 
-## 0. 为什么需要 framework
+## 0. Why you need a framework
 
-没有 framework 的面试最典型死法：**time sink**。在某一个环节（通常是画图或 deep dive）待了 25 分钟，然后被 interviewer 强行拖走，后面全是赶路，没有一处 deep dive。framework 的本质是**time budget**——每一阶段 timeout 你都要有知觉。
+The most typical way an interview dies without a framework: the **time sink**. You spend 25 minutes in one step (usually diagramming or a deep dive), then the interviewer drags you away, and everything after is rushing with not a single real deep dive. A framework is fundamentally a **time budget** — you must stay conscious of the timeout on every phase.
 
-## 1. six-phase overview
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│ Phase 1 requirements clarification 5 min 问题 checklist + scale estimation │
-│ Phase 2 core feature confirmation 3 min 3–5 个 features + 明确不做的东西 │
-│ Phase 3 high-level design 10 min component diagram + data flow + API skeleton │
-│ Phase 4 data model 5 min storage selection + 表/KV structure + sharding │
-│ Phase 5 deep dive 17 min 2–3 个 subsystem（和 interviewer negotiate） │
-│ Phase 6 wrap-up 5 min bottleneck / monitoring / operations / out-of-scope items │
-└──────────────────────────────────────────────────────────────┘
-```
-
-> 注意：Phase 3+4 合起来就是经典的「high-level design」；Alex Xu 的 4-step method 把 1+2 merge 为「理解需求」。structure 可以微调，**时间纪律不能破**。
-
-## 2. Phase 1 · requirements clarification（5 分钟）
-
-### must-ask checklist（背下来，每场都过一遍）
-
-**scale 类**
-- DAU / MAU 多少？——决定后面所有 capacity numbers
-- read-heavy 还是 write-heavy？read/write ratio？——决定 storage 和 cache 策略
-- peak multiplier 多少（日常 QPS × 3~5）？
-
-**feature boundaries 类**
-- core user flow 是什么？（让 interviewer 描述一个 user story）
-- 有哪些 client？（Web / iOS / Android / third-party API）
-- 要不要支持 offline / flaky network？
-
-**non-functional requirements 类（主动提，bonus signal）**
-- latency budget：P99 read 200ms 这种 order of magnitude acceptable 吗？
-- consistency：eventually consistent（second-level latency OK）还是要 read-your-writes？
-- availability target：几个 9？allow degraded mode 吗？
-- data 可以丢吗？丢多少？（log 类 vs billing 类天壤之别）
-
-### script templates
-
-> "让我先花几分钟对齐需求。我先问几个 scale 和 boundary 的问题，然后我会做一轮 estimation，你看 numbers 方向对不对。"
-
-> "这个题目没说 read/write ratio，我假设 100:1——如果接近 1:1，我后面 storage selection 会完全不同，所以想先跟你确认。"
-
-**关键动作**：把 interviewer 的回答**write 到 whiteboard 上**。这不是形式——后面每个设计决策你都要回头指它。
-
-## 3. Phase 2 · core feature confirmation（3 分钟）
-
-从需求里**distill 3–5 个 features**，并明确说什么不做：
-
-> "基于刚才的需求，我打算聚焦这四个 feature：①…②…③…④…。multi-region DR 和 third-party 开放 API 我先不展开，放到最后的 trade-off 里聊，可以吗？"
-
-这一步是 E5 signal 最密集的 30 秒：**convergence = 你知道什么重要**。interviewer 几乎总会说 yes，而这句话已经把「over-engineering」的 risk 提前拆掉了。
-
-## 4. Phase 3 · high-level design（10 分钟）
-
-画一张 component diagram，包含：client → gateway/LB → stateless service tier → cache → storage →（async）queue → downstream consumer。
-
-三条纪律：
-1. **draw-as-you-talk**，每个框只讲一句话的职责——细节留给 deep-dive phase
-2. **data flow 用编号箭头**：走一遍「user 发一个 request，12345 经过哪些组件」
-3. **每 2–3 分钟对齐一次**："这个高层 structure OK 吗？OK 的话我进入 data model。"——防止你在错误的方向上狂奔 10 分钟
-
-API skeleton（可选，30 秒过）：只列 endpoint 名 + 动词，不 write parameter 细节，除非面的是 Product Architecture 轮（见 08 章）。
-
-## 5. Phase 4 · data model（5 分钟）
-
-- 选 storage：SQL / NoSQL / KV / time-series / search engine——**必须带理由**（见 05 章 selection 表）
-- 画 table schema 或 KV structure：primary key、partition key、secondary index
-- 主动说 shard key 选择和 hot spot risk："我用 user_id 做 partition key，celebrity user 的 partition 会 skew，deep-dive phase 我讲怎么处理"
-
-## 6. Phase 5 · deep dive（17 分钟）——E5 的主战场
-
-### 怎么选 deep-dive spots
-
-> "现在有三处值得深入：A（fan-out 的 write amplification）、B（storage 的 scaling path）、C（consistency window）。我自己最想聊 A，因为它是最可能先挂的地方。你想看哪个？"
-
-这句话同时拿到三个高分 signal：主动性、risk 嗅觉、协作。interviewer 通常会选 A，或指出他关心的那个——**他说什么就挖什么**，他选的方向往往是他在打分的方向。
-
-### deep dive 的「drill-three-levels」法
-
-每钻一层回答：**是什么 → 为什么 → what if it breaks**
+## 1. Six-phase overview
 
 ```
-第一层：approach（"message delivery 用 long polling"）
-第二层：为什么（"comparison WebSocket：不需要双向低 latency，long polling operations 简单、兼容性好"）
-第三层：failure（"connection saturation 怎么办？→ connection gateway partition + heartbeat exclude + fall back to polling"）
+┌────────────────────────────────────────────────────────────────────┐
+│ Phase 1  Requirements clarification   5 min   question checklist + scale estimation │
+│ Phase 2  Core feature confirmation    3 min   3–5 features + explicit non-goals     │
+│ Phase 3  High-level design           10 min   component diagram + data flow + API skeleton │
+│ Phase 4  Data model                   5 min   storage selection + table/KV structure + sharding │
+│ Phase 5  Deep dive                   17 min   2–3 subsystems (negotiate with the interviewer) │
+│ Phase 6  Wrap-up                      5 min   bottlenecks / monitoring / operations / out-of-scope items │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
-### 被追问到知识 blind spot 时
+> Note: Phases 3+4 together are the classic "high-level design"; Alex Xu's 4-step method merges 1+2 into "understand the requirements." You may adjust the structure slightly, but **the time discipline is non-negotiable**.
 
-> "这块我没实际操作过。基于 X 和 Y 的原理，我的推理是 Z；但我没有把握，如果不对你可以纠正我。"
+## 2. Phase 1 · Requirements clarification (5 minutes)
 
-诚实 + 推理 > 硬编。E5 interviewer 阅人无数，编造 100% 被识破。
+### Must-ask checklist (memorize it; run through it every session)
 
-## 7. Phase 6 · wrap-up（5 分钟）
+**Scale**
+- What are the DAU / MAU? — determines every capacity number that follows
+- Read-heavy or write-heavy? What's the read/write ratio? — determines the storage and caching strategy
+- What's the peak multiplier (typical daily QPS × 3–5)?
 
-留出最后 5 分钟（提前看表），主动覆盖：
+**Feature boundaries**
+- What is the core user flow? (have the interviewer describe a user story)
+- Which clients must be supported? (Web / iOS / Android / third-party API)
+- Do we need offline / flaky-network support?
 
-- **SPOF**：图里哪个框挂了最伤？→ redundancy approach
-- **bottleneck**：traffic ×10 先死哪里？（通常是 DB write、fan-out、network bandwidth 三选一）
-- **monitoring**：3 个 SLI（latency P99 / error rate / backlog）
-- **operations**：how to deploy、怎么 canary rollout、怎么 rollback
-- **out-of-scope items**："geo-routing 和 cost 优化今天没展开，我认为 priority 低于以上这些。"
+**Non-functional requirements (raise these proactively — bonus signal)**
+- Latency budget: is an order of magnitude like P99 read 200ms acceptable?
+- Consistency: eventually consistent (second-level lag is OK) or read-your-writes?
+- Availability target: how many nines? Is a degraded mode acceptable?
+- Can data be lost, and how much? (logs vs billing are worlds apart)
 
-以「out-of-scope items checklist」wrap-up 是高级 signal：说明你知道自己设计的 boundary 在哪。
+### Script templates
 
-## 8. 常见流程 incident 与 rescue
+> "Let me spend a few minutes aligning on requirements first. I'll ask some scale and boundary questions, then run a round of estimation so you can check whether the numbers point in the right direction."
 
-| incident | rescue script |
-|------|---------|
-| requirements clarification 10 分钟还没完 | "差不多了，剩下的我边做边假设，write 在这边。" |
-| interviewer 中途改需求 | 停笔 → "这影响 A 和 B，C 不受影响。我改这两处，然后继续。" （impression 影响分析 = 加分） |
-| freezing up 30 秒+ | 说出来："我在 A 和 B 之间犹豫，差别是……我倾向 A。" freezing up 沉默才是 fatal 的。 |
-| 时间不够 | "剩下 8 分钟，我想优先把 X 讲完，Y 和 Z 我一句话带过。" interviewer 爱死这种时间感。 |
+> "The problem doesn't specify the read/write ratio. I'll assume 100:1 — if it's closer to 1:1, my storage choice later would be completely different, so I'd like to confirm this with you first."
 
-## 9. practice method
+**Key move**: **write the interviewer's answers on the whiteboard**. This isn't ceremony — every design decision afterward requires you to point back at them.
 
-1. **template internalize**：拿着 script templates 做 3 道题，之后扔掉 template
-2. **recording retrospective**：手机录屏自己走全流程，重点看——有没有沉默 >10 秒、每个阶段实际用时、interviewer 视角能不能跟上
-3. **live mock**：把 framework 练熟之后再上 [Interviewing.io](https://interviewing.io) 或朋友面，别浪费 live mock 在练 framework 上
+## 3. Phase 2 · Core feature confirmation (3 minutes)
+
+**Distill 3–5 features** from the requirements, and state explicitly what you will not build:
+
+> "Based on the requirements so far, I plan to focus on these four features: ①... ②... ③... ④.... I won't expand on multi-region DR or a public third-party API for now — I'll come back to them in the trade-offs at the end. Does that work?"
+
+This is the most signal-dense 30 seconds of the E5 interview: **converging = you know what matters**. The interviewer will almost always say yes, and with that sentence you've defused the "over-engineering" risk in advance.
+
+## 4. Phase 3 · High-level design (10 minutes)
+
+Draw one component diagram that includes: client → gateway/LB → stateless service tier → cache → storage → (async) queue → downstream consumers.
+
+Three disciplines:
+1. **Draw-as-you-talk**, one sentence per box for its responsibility — details are saved for the deep-dive phase
+2. **Number the arrows on the data flow**: walk through "a user sends a request — which components does it pass through?"
+3. **Check in every 2–3 minutes**: "Is this high-level structure OK? If so, I'll move on to the data model." — this prevents you from sprinting 10 minutes in the wrong direction
+
+API skeleton (optional, 30 seconds): list endpoint names + verbs only; skip parameter details unless you're interviewing for a Product Architecture round (see chapter 08).
+
+## 5. Phase 4 · Data model (5 minutes)
+
+- Choose storage: SQL / NoSQL / KV / time-series / search engine — **always with a reason** (see the selection table in chapter 05)
+- Draw the table schema or KV structure: primary key, partition key, secondary index
+- Proactively state your shard key choice and hot-spot risk: "I'm using user_id as the partition key — celebrity users' partitions will skew; in the deep-dive phase I'll cover how to handle that"
+
+## 6. Phase 5 · Deep dive (17 minutes) — the E5 main battleground
+
+### How to pick deep-dive spots
+
+> "There are three spots worth going deep on: A (write amplification in the fan-out), B (the scaling path of the storage layer), and C (the consistency window). The one I most want to discuss is A, because it's the most likely to fail first. Which would you like to look at?"
+
+That single sentence earns three high-value signals at once: initiative, risk instinct, and collaboration. The interviewer will usually pick A, or name the one they care about — **whatever they name, drill into that**; the direction they choose is usually the one they're scoring.
+
+### The "drill-three-levels" method for deep dives
+
+At each level, answer: **what it is → why → what if it breaks**
+
+```
+Level 1: The approach ("message delivery uses long polling")
+Level 2: The why ("versus WebSocket: we don't need bidirectional low latency, long polling is simpler to operate and more compatible")
+Level 3: The failure ("what about connection saturation? → partition the connection gateway + heartbeat-based eviction + fall back to polling")
+```
+
+### When you're pushed into a knowledge blind spot
+
+> "I haven't operated this hands-on. Based on the principles of X and Y, my reasoning is Z — but I'm not certain, so please correct me if I'm wrong."
+
+Honesty + reasoning beats fabrication. E5 interviewers have seen hundreds of candidates; making something up gets caught 100% of the time.
+
+## 7. Phase 6 · Wrap-up (5 minutes)
+
+Reserve the last 5 minutes (watch the clock ahead of time) and cover proactively:
+
+- **SPOF**: which box in the diagram hurts most if it dies? → redundancy approach
+- **Bottleneck**: if traffic ×10, what dies first? (usually one of: DB writes, the fan-out, network bandwidth)
+- **Monitoring**: 3 SLIs (latency P99 / error rate / backlog)
+- **Operations**: how to deploy, how to do a canary rollout, how to roll back
+- **Out-of-scope items**: "geo-routing and cost optimization weren't covered today; I'd rank them below everything above."
+
+Wrapping up with an "out-of-scope checklist" is an advanced signal: it shows you know where your design's boundary lies.
+
+## 8. Common process incidents and rescues
+
+| Incident | Rescue script |
+|----------|---------------|
+| Requirements clarification still going at 10 minutes | "I think we're about there — I'll assume the rest as I go and write them down here." |
+| Interviewer changes the requirements mid-flight | Stop writing → "This affects A and B; C is unaffected. I'll change those two spots and continue." (a visible impact analysis = bonus points) |
+| Freezing up for 30+ seconds | Say it out loud: "I'm torn between A and B; the difference is... I lean toward A." The silent freeze is what's fatal. |
+| Running out of time | "8 minutes left — I want to prioritize finishing X, and cover Y and Z in one sentence each." Interviewers love this kind of time awareness. |
+
+## 9. Practice method
+
+1. **Internalize the templates**: run 3 problems holding the script templates, then throw the templates away
+2. **Recording retrospective**: screen-record yourself running the full flow on your phone, watching specifically for — silences >10 seconds, actual time spent per phase, and whether the flow is followable from the interviewer's seat
+3. **Live mocks**: only do [Interviewing.io](https://interviewing.io) or friend mocks after the framework is drilled in — don't waste live mocks on practicing the framework
 
 ## Next Module
 

@@ -1,29 +1,29 @@
 # Q6 · Distributed Message Queue (Design a Kafka)
 
-> Difficulty: Medium–Hard ｜ archetype：write-heavy + peak shaving（自己造轮子版）
-> 逆向题——不是"用 Kafka 设计 X"，而是"设计 Kafka 本身"。最考察**storage engine + delivery semantics**的底层功力。
+> Difficulty: Medium–Hard | archetype: write-heavy + peak shaving (the build-your-own-wheel edition)
+> The inverted problem — not "design X using Kafka," but "design Kafka itself." It probes your fundamentals on **storage engines + delivery semantics** more than anything else.
 
 ## 1. Problem Statement
 
-"设计一个 distributed message queue：producer 发 message，consumer subscription 处理。要高 throughput、不丢 message、支持一个 consumer group 并行消费。"
+"Design a distributed message queue: producers send messages, consumers subscribe and process them. It needs high throughput, no message loss, and support for parallel consumption within a consumer group."
 
 ## 2. Clarifying Questions
 
-| 问题 | intent |
+| Question | Intent |
 |------|------|
-| throughput target？latency target？（百万 QPS + ms 级？）| storage model 选择的输入 |
-| message 大小？（KB 级 vs MB 级）| append-only log vs 逐条 index |
-| delivery semantics requirement？at-least-once 还是 exactly-once？| 整题的 deep dive 方向 |
-| message 要 retention period？（consume-and-delete vs 按 retention 保留）| **Kafka 与传统 MQ 的 dividing line** |
-| 要不要 transaction message / latency message？| scope control |
+| Throughput target? Latency target? (1M+ QPS + millisecond level?) | Input to the storage model choice |
+| Message size? (KB-scale vs MB-scale) | Append-only log vs per-message index |
+| Delivery semantics requirement? At-least-once or exactly-once? | Sets the deep dive direction for the whole problem |
+| Do messages need a retention period? (consume-and-delete vs retention-based) | **The dividing line between Kafka and traditional MQs** |
+| Do we need transactional messages / delayed messages? | Scope control |
 
-## 3. estimation（本题用来论证设计决策）
+## 3. Estimation (used here to justify design decisions)
 
 ```
-1M msg/s × 1KB = 1 GB/s 入流；retention 7 天 = 600TB
-单 node NVMe sequential writes ~2 GB/s → ordering append-only log 是唯一可行 write model
-random write 只有 ~100 MB/s → 任何"每 message 一条 record"的设计直接死亡
-takeaway → append-only log（append-only log）不是选择，是物理规律
+1M msg/s × 1KB = 1 GB/s ingress; 7-day retention = 600TB
+A single NVMe node sustains ~2 GB/s sequential writes → an ordered append-only log is the only viable write model
+Random writes only get ~100 MB/s → any "one record per message" design dies on the spot
+takeaway → the append-only log isn't a choice, it's a law of physics
 ```
 
 ## 4. High-Level Design
@@ -36,81 +36,81 @@ Producer ──▶ Broker cluster
               │ Partition 1 (broker 2) [log: ...] │
               │ Partition 2 (broker 3) [log: ...] │
               └───────────────────────────────────────┘
-              每 partition = Leader（write）+ ISR replica（synchronous replication）
-元 data/leader election：Controller / ZooKeeper / Raft
-Consumer Group：每组每 partition 恰好分配一个 consumer instance
-              offset 提交到内部 topic（__consumer_offsets）
+              Each partition = Leader (writes) + ISR replicas (synchronous replication)
+Metadata/leader election: Controller / ZooKeeper / Raft
+Consumer Group: within each group, each partition is assigned to exactly one consumer instance
+              offsets committed to an internal topic (__consumer_offsets)
 ```
 
-## 5. Data Model（core 洞察所在）
+## 5. Data Model (where the core insight lives)
 
 ```
-Partition = disk 上的 append-only log file 序列（segment）
-每条 message 只有 8 字节的"primary key"：offset（partition 内的 monotonic 递增序号）
-index = 稀疏 index（每 4KB 一条 offset→file position），二分查找定位 segment
+Partition = a sequence of append-only log files (segments) on disk
+Each message has only an 8-byte "primary key": the offset (a monotonically increasing sequence number within the partition)
+index = sparse index (one offset→file position entry per 4KB), binary search locates the segment
 ```
 
-**三连击 script**：
-1. "message 不删除不修改、只追加——**把 random write 变成 sequential writes**，throughput 差 2 个数 order of magnitude，这是整个设计的第一性原理"
-2. "消费不删 message，只移动 offset——**消费是 read + 指针**，所以一个 topic 可以被任意多组 consumer 重复消费（Kafka 'consume-and-delete'的 RabbitMQ 的本质区别）"
-3. "partition 是并行度的 atomic 单位：Producer 按 key hash 到 partition（同 key ordered），消费并行度 ≤ partition count——**想清楚 business 要什么级别的 ordered**再定 partition count"
+**The three-hit script**:
+1. "Messages are never deleted or modified, only appended — **turn random writes into sequential writes**, and throughput improves by two orders of magnitude. That's the first principle of the entire design."
+2. "Consuming doesn't delete a message, it just moves the offset — **consumption is read + pointer**, so any number of consumer groups can replay the same topic (the essential difference from RabbitMQ's consume-and-delete model)."
+3. "The partition is the atomic unit of parallelism: producers hash by key to a partition (same key = ordered), and consumption parallelism ≤ partition count — **figure out what level of ordering the business actually needs** before fixing the partition count."
 
 ## 6. Deep Dives
 
-### Deep Dive A · 不丢 message 的三段论（must-know）
+### Deep Dive A · The three-segment syllogism of no message loss (must-know)
 
-逐段讲，每段都有坑：
+Walk through each segment; each one has pitfalls:
 
-**① Producer → Broker**：
-- acks=0（fire and forget）/ acks=1（leader 落盘）/ **acks=all（ISR 全部落盘）**
-- "acks=all + min.insync.replicas=2 + replication.factor=3 才是'不丢'的完整配置——只说 acks=all 不提 ISR 收缩（min.insync 不满足时拒绝 write）等于没配"
-- retry + idempotent producer（broker 按 PID+seq dedup）
+**① Producer → Broker**:
+- acks=0 (fire and forget) / acks=1 (leader persisted) / **acks=all (full ISR persisted)**
+- "acks=all + min.insync.replicas=2 + replication.factor=3 is the complete 'no loss' configuration — saying acks=all without mentioning ISR shrinkage (writes rejected when min.insync isn't satisfied) means you haven't configured anything"
+- Retry + idempotent producer (the broker dedupes by PID + sequence number)
 
-**② Broker 内部**：
-- ISR（in-sync replicas）机制：落后太多的 replica 踢出 ISR
-- "unclean.leader.election：允许落后 replica 当 leader = data 丢；禁止 = availability 降——**这就是 CAP 在 MQ 里的具象**"
+**② Inside the Broker**:
+- The ISR (in-sync replicas) mechanism: replicas that fall too far behind get kicked out of the ISR
+- "unclean.leader.election: allowing a lagging replica to become leader = data loss; forbidding it = reduced availability — **this is CAP made concrete inside an MQ**"
 
-**③ Broker → Consumer**：
-- 先消费后提交 offset：at-least-once（崩溃 replay，可能重复）
-- 先提交后消费：at-most-once（崩溃丢 message）
-- "offset 提交时机 = delivery semantics 的选择器"
+**③ Broker → Consumer**:
+- Consume first, commit the offset after: at-least-once (crash → replay, possible duplicates)
+- Commit first, consume after: at-most-once (crash → lost messages)
+- "When the offset gets committed *is* the delivery semantics selector."
 
-### Deep Dive B · Exactly-once 怎么实现
+### Deep Dive B · How exactly-once actually works
 
-- idempotent producer 只解决单 partition 单 session → 跨 partition 需要**transaction**（two-phase commit 到内部 topic）
-- 端到端 exactly-once = transaction + consumer 端**只 read 已提交**（read_committed）
-- "Kafka Streams / Flink two-phase commit checkpoint 把 sink 一并纳入 transaction——cost 是 throughput 显著下降。**先问 business 能不能用'at-least-once + idempotent 消费'凑合**，大多数时候能，那就别为 exactly-once 付费。"（这句话本身是 E5 signal）
+- The idempotent producer only covers a single partition within a single session → going cross-partition requires **transactions** (two-phase commit to an internal topic)
+- End-to-end exactly-once = transactions + the consumer side **reading only committed data** (read_committed)
+- "Kafka Streams / Flink two-phase-commit checkpoints bring the sink into the transaction too — the cost is a significant throughput drop. **First ask whether the business can live with at-least-once + idempotent consumption**; most of the time it can, so don't pay for exactly-once." (This sentence itself is an E5 signal.)
 
-### Deep Dive C · 消费组 rebalancing（Rebalance）
+### Deep Dive C · Consumer group rebalancing
 
-- consumer 上下线 → partition reassignment → **rebalancing 期间全组暂停消费**（stop-the-world）
-- 协调者（group coordinator）heartbeat/session timeout 探测
-- 坑：GC 停顿被误判死亡 → jitter storm；调 session.timeout + heartbeat 频率 + rebalancing 协议升级（增量 rebalancing/cooperative）
-- "消费端的 long tail GC 会放大成整个 queue 的消费 latency——**queue 的稳定性被最慢的 consumer 绑架**"
+- Consumers going on/offline → partition reassignment → **the entire group pauses consumption during rebalancing** (stop-the-world)
+- The group coordinator probes with heartbeats/session timeouts
+- Pitfall: GC pauses mistaken for death → jitter storms; tune session.timeout + heartbeat frequency + rebalancing protocol upgrades (incremental/cooperative rebalancing)
+- "Long-tail GC on one consumer amplifies into consumption latency for the entire queue — **the queue's stability is held hostage by its slowest consumer**."
 
-### Deep Dive D · 与传统 MQ 的 comparison wrap-up
+### Deep Dive D · Comparison wrap-up vs traditional MQ
 
 | | Kafka model | RabbitMQ model |
 |---|---|---|
-| storage | log retention、offset 指针 | queue、consume-and-delete |
-| throughput | 百万级 | 万级 |
-| routing | 简单（topic+key） | 灵活（exchange routing）|
-| 重复消费 | 天然支持 | 需要 DLX 变通 |
-| latency message | 不原生 | 插件/原生 |
+| Storage | Log retention, offset pointer | Queue, consume-and-delete |
+| Throughput | Millions-level | Tens-of-thousands-level |
+| Routing | Simple (topic + key) | Flexible (exchange routing) |
+| Repeated consumption | Natively supported | Requires DLX workarounds |
+| Delayed messages | Not native | Plugins/native |
 
-"selection 看三个问题：要 throughput 吗？要回放吗？要复杂 routing 吗？"
+"Selection comes down to three questions: do you need throughput? Do you need replay? Do you need complex routing?"
 
 ## 7. Red Flags
 
-- 每条 message 一个 database 行 / 一条 Redis record（没 awareness 到 sequential writes 的物理优势）
-- 说"acks=all 就不丢了"（没提 ISR 收缩）
-- exactly-once 与 at-least-once + idempotent 混为一谈
-- 没有 partition 与 ordered 性的讨论
-- 不知道 rebalancing 会 stop-the-world
+- One database row / one Redis record per message (no awareness of the physical advantage of sequential writes)
+- Saying "acks=all means no loss" (no mention of ISR shrinkage)
+- Conflating exactly-once with at-least-once + idempotent
+- No discussion of partitions and ordering
+- Not knowing that rebalancing is stop-the-world
 
 ## 8. One-Minute Elevator Pitch
 
-"第一性原理是把 random write 变 sequential writes：partition = append-only log + 稀疏 index，message immutable、消费只是移动 offset——因此支持多组重复消费和回放。不丢 message 三段配置：producer acks=all+idempotent retry、broker ISR synchronous replication + min.insync.replicas 拒绝 write、consumer 先消费后提交（at-least-once），需要 exactly-once 时上 transaction + read_committed，但我会先问 business 能不能用 idempotent 消费替代。partition 是并行和 ordered 的 atomic 单位——同 key 同 partition 才 ordered，partition count 即消费并行上限。rebalancing 是 stop-the-world storm，消费端稳定性（GC、长任务）是 queue 稳定性的隐藏约束。"
+"The first principle is turning random writes into sequential writes: a partition = an append-only log + a sparse index, messages are immutable, and consuming just moves the offset — which is what enables multiple groups and replay. No-loss is a three-segment configuration: producer acks=all + idempotent retry, broker ISR synchronous replication + min.insync.replicas rejecting writes, consumer consumes first and commits after (at-least-once); when exactly-once is required, add transactions + read_committed, but I'd first ask whether idempotent consumption can substitute. The partition is the atomic unit of both parallelism and ordering — same key, same partition, that's the ordering guarantee; partition count caps consumption parallelism. Rebalancing is a stop-the-world storm, and consumer-side stability (GC, long tasks) is the queue's hidden constraint."
 
 ---
-← [Q5 News Feed](05-news-feed.md) ｜ [Q7 Ticket Booking →](07-ticket-booking.md)
+← [Q5 News Feed](05-news-feed.md) | [Q7 Ticket Booking →](07-ticket-booking.md)

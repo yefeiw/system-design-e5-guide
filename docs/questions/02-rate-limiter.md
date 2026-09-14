@@ -1,91 +1,91 @@
 # Q2 · Rate Limiter
 
-> Difficulty: Easy–Medium ｜ archetype：algorithmic deep dives + distributed consistency
-> 题目小，但**algorithm 层四档 comparison + distributed clock 问题**能一路问到 E5 的知识底。
+> Difficulty: Easy–Medium | archetype: algorithmic deep dives + distributed consistency
+> The problem is small, but **the four-way algorithm comparison plus the distributed clock problem** can drill all the way down to the floor of your E5 knowledge.
 
 ## 1. Problem Statement
 
-"设计一个 API rate limiter，防止 abuse。要支持每 user 每秒/每分钟 N 个 request。"
+"Design an API rate limiter to prevent abuse. It needs to support N requests per second / per minute per user."
 
 ## 2. Clarifying Questions
 
-| 问题 | intent |
+| Question | Intent |
 |------|------|
-| 限谁的 dimension？（IP / user / API key / global）| 决定 rate limiting key design |
-| hard limit 还是 soft limit？（超了 return 429 还是 queueing）| availability 取向 |
-| distributed or single-machine rate limiting？ | 本题 dividing line |
-| rule 要动态 push-down 吗？ | 引入 config center |
-| rate limiting 的 semantics：average rate vs burst capacity | 直接指向 algorithm 选择 |
+| What dimension are we limiting on? (IP / user / API key / global) | Determines the rate limiting key design |
+| Hard limit or soft limit? (return 429 when exceeded, or queue?) | Availability orientation |
+| Distributed or single-machine rate limiting? | The dividing line for this problem |
+| Do rules need to be pushed down dynamically? | Brings in a config center |
+| Rate limiting semantics: average rate vs burst capacity | Points straight at the algorithm choice |
 
-## 3. estimation（简短，本题不在 numbers 上纠缠）
+## 3. Estimation (brief—this problem doesn't get hung up on numbers)
 
-"假设 100K QPS peak、2000 万活跃 key——rate limiting 判断本身必须 <1ms P99 且不成为新 bottleneck，所以它必须是**memory 级操作**，这是本题第一设计约束。"
+"Assume 100K QPS peak and 20 million active keys—the rate limiting decision itself must be <1ms P99 and must not become a new bottleneck, so it has to be an **in-memory operation**. That's the first design constraint of this problem."
 
 ## 4. High-Level Design
 
 ```
                         ┌────────────────────────────┐
-client ──▶ API Gateway ──▶ rate limiting middleware（in-process）──▶ business service
-                          │ ↑ rule push-down（config center）
-                          │ ↕ async counter sync（Redis，eventually consistent）
+client ──▶ API Gateway ──▶ rate limiting middleware (in-process) ──▶ business service
+                          │ ↑ rule push-down (config center)
+                          │ ↕ async counter sync (Redis, eventually consistent)
                           └────────────────────────────┘
-rate-limited request ──▶ 429 + Retry-After ──▶ （可选）Kafka record rate-limited event
+rate-limited request ──▶ 429 + Retry-After ──▶ (optional) Kafka record of rate-limited event
 ```
 
-**关键 architecture 决策**："rate limiting 在**gateway/middleware in-process 做**，Redis 只做跨 instance 的 counter convergence（async/quasi-sync）。每 request 一次 Redis sync call 会把 rate limiter 自己变成 20 万 QPS 的 Redis cluster——得不偿失。"
+**Key architecture decision**: "Rate limiting is done **in-process in the gateway/middleware**; Redis only handles cross-instance counter convergence (async/quasi-sync). A synchronous Redis call on every request turns the rate limiter itself into a 200K QPS Redis cluster—the cure is worse than the disease."
 
 ## 5. Data Model
 
-Redis：`rate:{user_id}:{window_start}` → counter / token bucket state（Lua 脚本 atomic read-modify-write）。
-rule 中心：`rule_id → {key_template, algorithm, limit, window, burst}`。
+Redis: `rate:{user_id}:{window_start}` → counter / token bucket state (atomic read-modify-write via Lua script).
+Rule center: `rule_id → {key_template, algorithm, limit, window, burst}`.
 
 ## 6. Deep Dives
 
-### Deep Dive A · 四种 algorithm（must-know，背成 comparison 表）
+### Deep Dive A · The four algorithms (must-know, memorize them as a comparison table)
 
-| algorithm | 原理 | 优点 | fatal 缺点 |
+| Algorithm | How it works | Pros | Fatal flaw |
 |------|------|------|---------|
-| fixed window | 每 N 秒 counter 清零 | 最简单、省 memory | **window boundary burst**：两个 window 交界可放行 2N |
-| sliding window log | record 每个 request timestamp | exact | memory O(QPS×window)，大 traffic 不可用 |
-| **sliding window counter** | 当前 window counter ×(1-elapsed fraction) + previous window counter ×elapsed fraction | approximate 平滑、O(1) memory | 两 window 交界处仍是 approximate |
-| **token bucket** | bucket capacity b，rate r tokens added at a constant rate | **允许受控 burst**、industry default（Guava/WFF） | parameter semantics 要讲清（b 和 r separate） |
+| Fixed window | Counter resets every N seconds | Simplest, memory-efficient | **Window boundary burst**: 2N can get through at the seam between two windows |
+| Sliding window log | Records every request timestamp | Exact | Memory is O(QPS×window), unusable at high traffic |
+| **Sliding window counter** | Current window counter ×(1-elapsed fraction) + previous window counter ×elapsed fraction | Smooth approximation, O(1) memory | Still approximate at the seam between two windows |
+| **Token bucket** | Bucket capacity b, tokens added at a constant rate r | **Allows controlled bursts**, the industry default (Guava/WFF) | You must explain the parameter semantics clearly (b and r are separate) |
 
-E5 表达："default 答案 token bucket——因为它把『average rate』和『burst capacity』分成两个 orthogonal parameter，符合真实 traffic formats。如果 business 明确不允许任何 burst（比如保护脆弱 downstream），换 leaky bucket shaping。Cloudflare production 用的是 sliding window counter（他们的 blogs 值得 read）。"
+E5 framing: "The default answer is token bucket—because it splits 'average rate' and 'burst capacity' into two orthogonal parameters, which matches real traffic patterns. If the business explicitly disallows any burst (say, to protect a fragile downstream), switch to leaky bucket shaping. Cloudflare's production system uses a sliding window counter (their blog posts are worth reading)."
 
-### Deep Dive B · distributed：sync vs async（本题的 E5 dividing line）
+### Deep Dive B · Distributed: sync vs async (the E5 dividing line for this problem)
 
-**sync mode**（每 request 查 Redis + Lua atomic 判断）：
-- exact，但 Redis 成 critical path——挂了 rate limiter 全挂
-- mitigate：Redis cluster + consistent hashing 分 key
+**Sync mode** (query Redis on every request with an atomic Lua check):
+- Exact, but Redis becomes part of the critical path—if it goes down, the rate limiter goes down with it
+- Mitigation: Redis cluster plus consistent hashing to spread the keys
 
-**async mode**（local 判断为主，定期和 Redis reconciliation）：
-- Redis 挂了照样 rate limiting（degrade to standalone rate limiting）→ **availability 优先**
-- cost：多 instance 合计会**短暂 over-limit**（比如允许 1.1N）——"对 anti-abuse scenario，10% 的 over-limit 换取 rate limiting system 自身永不成为 failure 点，这个 trade-off 我主动接受并 write 进设计文档。"
+**Async mode** (decide locally, periodically reconcile with Redis):
+- Rate limiting keeps working even if Redis dies (degrade to standalone rate limiting) → **availability first**
+- Cost: across instances the total will **briefly over-limit** (say 1.1N gets through)—"For an anti-abuse scenario, 10% over-limit in exchange for the rate limiting system itself never becoming a failure point is a trade-off I accept deliberately and write into the design doc."
 
-被问"必须 exact 怎么办"→ sync mode + Redis HA + "exact rate limiting 本身就是个 strongly consistent 需求，cost 要讲给 business 听"。
+If asked "what if it has to be exact" → sync mode plus Redis HA, and "exact rate limiting is itself a strongly consistent requirement, and that cost has to be explained to the business."
 
-### Deep Dive C · clock 与 fairness
+### Deep Dive C · Clock and fairness
 
-- 各 instance clock drift 对 window 计算的影响（用 monotonic clock + Redis 中心 timestamp calibration）
-- sliding window 的 memory 问题在多 key 下被放大 → sharding 按 key hash
-- cold start：service 重启后 local counter 清零 → 从 Redis 快速 warm-up
+- How clock drift across instances affects window computation (use a monotonic clock plus timestamp calibration from Redis as the central authority)
+- The memory cost of the sliding window is amplified with many keys → shard by key hash
+- Cold start: local counters reset to zero after a service restart → warm up quickly from Redis
 
-### Deep Dive D · rate limiting 之后的 response 设计
+### Deep Dive D · Response design after rate limiting
 
-- 429 + `Retry-After` 头 + `X-RateLimit-Remaining`（API 友好性，很多 senior 都漏）
-- tiered rate limiting：gateway tier coarse-grained（IP）+ service tier fine-grained（user+endpoint）
-- rate-limited event 进 Kafka → attack detection / rule tuning
+- 429 with a `Retry-After` header plus `X-RateLimit-Remaining` (API friendliness—plenty of seniors miss this)
+- Tiered rate limiting: coarse-grained at the gateway tier (IP) plus fine-grained at the service tier (user + endpoint)
+- Rate-limited events go to Kafka → attack detection / rule tuning
 
 ## 7. Red Flags
 
-- 只会"fixed window counter + Redis INCR"一档，说不出 boundary burst 问题
-- 把 Redis sync call 放 critical path 却不讨论它挂掉的 scenario
-- 不知道 token bucket 的 burst 与 rate 是两个 parameter
-- 没有 degradation approach（rate limiter 自己把全站打挂 = 设计 incident）
+- Only knowing the "fixed window counter + Redis INCR" tier and being unable to explain the boundary burst problem
+- Putting a synchronous Redis call on the critical path without discussing what happens when Redis dies
+- Not knowing that burst and rate are two separate parameters in a token bucket
+- No degradation plan (the rate limiter itself taking down the whole site = a design incident)
 
 ## 8. One-Minute Elevator Pitch
 
-"in-process token bucket 做判断（r 控 average、b 控 burst），Redis 做跨 instance counter convergence——sync mode exact 但把 Redis 放进 critical path，我 default async reconciliation + degrade to standalone rate limiting，接受 10% over-limit 换 availability，anti-abuse scenario 这个 trade-off 成立。rule 从 config center push-down 支持 hot reload，rate-limited request 带 Retry-After return，event 进 Kafka 做分析。如果 downstream 是 billing 类必须 exact，我会换 sync + Redis cluster 并把 cost 讲清楚。"
+"In-process token buckets make the decision (r controls the average, b controls the burst), and Redis handles cross-instance counter convergence. Sync mode is exact but puts Redis on the critical path, so I default to async reconciliation plus degrade-to-standalone rate limiting, accepting 10% over-limit in exchange for availability—for an anti-abuse scenario that trade-off holds up. Rules are pushed down from a config center to support hot reload, rate-limited requests come back with Retry-After, and events go to Kafka for analytics. If the downstream were something like billing and had to be exact, I'd switch to sync plus a Redis cluster and spell out the cost."
 
 ---
-← [Q1 short URL](01-url-shortener.md) ｜ [Q3 Top-K →](03-top-k-heavy-hitters.md)
+← [Q1 short URL](01-url-shortener.md) | [Q3 Top-K →](03-top-k-heavy-hitters.md)

@@ -1,55 +1,55 @@
-# System Design @ E5 — Senior Engineer 面试讲义
+# System Design @ E5 — Senior Engineer Interview Lecture Series
 
-> 面向北美 E5 / Senior Engineer 职级的 System Design 面试完整 prep 讲义。
-> 综合了 Hello Interview、ByteByteGo、System Design Primer、Design Gurus (Grokking)、System Design Handbook 等北美主流 resource 的 definitions、rubric 与 framework，并结合 FAANG interviewer 视角整理而成。
+> A complete prep lecture series for the System Design interview at the North American E5 / Senior Engineer level.
+> It synthesizes the definitions, rubrics, and frameworks from mainstream North American resources — Hello Interview, ByteByteGo, System Design Primer, Design Gurus (Grokking), System Design Handbook — organized through the lens of a FAANG interviewer.
 
-## 这套讲义是什么
+## What This Series Is
 
-一句话：**从「会做题」到「像 Senior 一样驱动一场设计讨论」**。
+In one sentence: **going from "solving problems" to "driving a design discussion like a Senior."**
 
-E5 的 System Design 面试不是考你背过几个 architecture 图，而是考你能否在一个 45 分钟的开放问题里，**主动 convergence 需求、提出 approach、深入关键 subsystem、并把每个决策的 trade-off 讲清楚**。这套讲义按五层递进组织：
+The E5 System Design interview is not testing whether you have memorized a few architecture diagrams. It tests whether, in a 45-minute open-ended problem, you can **proactively converge the requirements, propose an approach, go deep on the key subsystems, and articulate the trade-off behind every decision**. This series is organized as five progressive layers:
 
 ```
-认知（面试考什么）→ 基础（estimation/building blocks）→ 设计能力（classic problems deep dive）→ real-world systems → 表达与节奏
+Cognition (what the interview tests) → Fundamentals (estimation / building blocks) → Design Skill (classic problem deep dives) → Real-World Systems → Communication and Pacing
 ```
 
-## 目录
+## Table of Contents
 
-| # | 模块 | 内容 | 时间投入 |
-|---|------|------|---------|
-| 01 | [What Is System Design](docs/01-what-is-system-design.md) | definitions、面试 types、four-dimension rubric | 1 天 |
-| 02 | [E5/Senior 的 Expectations](docs/02-e5-senior-expectations.md) | E5 vs E4 本质区别、interviewer 在找什么 signal | 1 天 |
-| 03 | [Delivery Framework: Running the 45 Minutes](docs/03-delivery-framework.md) | six-phase timeline + 每阶段 script templates | 2 天（练到肌肉记忆）|
-| 04 | [Estimation & Numbers to Know](docs/04-estimation-numbers.md) | Back-of-envelope、Numbers to Know cheat sheet | 2 天 |
-| 05 | [Building Blocks](docs/05-building-blocks.md) | LB / cache / database / sharding / consistency / message queue / CDN | 1–2 周 |
-| 06 | [classic problems overview](docs/06-classic-questions-overview.md) | problem grading、E5 high-frequency checklist、practice method | — |
-| Q1 | [URL shortener](docs/questions/01-url-shortener.md) | starter problem + ID generate deep dive | 3 小时 |
-| Q2 | [rate limiter](docs/questions/02-rate-limiter.md) | algorithmic deep dives + distributed consistency | 3 小时 |
-| Q3 | [Top-K / Heavy Hitters](docs/questions/03-top-k-heavy-hitters.md) | streaming algorithm + accuracy trade-off | 3 小时 |
-| Q4 | [chat system](docs/questions/04-chat-system.md) | real-time 实现：transport 选型（MQTT/WebSocket）/ connection lifecycle & session resume / 三种 tick 的投递路径 / ephemeral signals / E2EE | 3 小时 |
-| Q5 | [News Feed](docs/questions/05-news-feed.md) | Push vs Pull / Fan-out / consistency | 3 小时 |
-| Q6 | [distributed message queue](docs/questions/06-distributed-message-queue.md) | storage model / delivery guarantees / Kafka comparison | 3 小时 |
-| Q7 | [Ticket Booking system](docs/questions/07-ticket-booking.md) | concurrency 控制 / strongly consistent / queueing | 3 小时 |
-| Q8 | [Ad Click Aggregator](docs/questions/08-ad-click-aggregator.md) | 流处理 / Exactly-once / billing accuracy | 3 小时 |
-| 07 | [real-world systems case studies](docs/07-real-systems-case-studies.md) | Netflix / Uber / classic papers breakdown | 持续 |
-| 08 | [Company Style Guide](docs/08-company-guides.md) | Meta Pirate / Google / Amazon 差异 | 0.5 天 |
-| 09 | [Resource Map](docs/09-resources.md) | websites / videos / books / papers，categorized by use | — |
-| 10 | [6-Week Study Plan](docs/10-study-plan.md) | weekly plan + Mock 安排 | — |
+| # | Module | Content | Time Investment |
+|---|--------|---------|-----------------|
+| 01 | [What Is System Design](docs/01-what-is-system-design.md) | definitions, interview types, four-dimension rubric | 1 day |
+| 02 | [E5/Senior Expectations](docs/02-e5-senior-expectations.md) | the essential E5 vs E4 differences, what signal interviewers look for | 1 day |
+| 03 | [Delivery Framework: Running the 45 Minutes](docs/03-delivery-framework.md) | six-phase timeline + script templates per phase | 2 days (drill until it's muscle memory) |
+| 04 | [Estimation & Numbers to Know](docs/04-estimation-numbers.md) | back-of-envelope, Numbers to Know cheat sheet | 2 days |
+| 05 | [Building Blocks](docs/05-building-blocks.md) | LB / cache / database / sharding / consistency / message queue / CDN | 1–2 weeks |
+| 06 | [Classic Problems Overview](docs/06-classic-questions-overview.md) | problem grading, E5 high-frequency checklist, practice method | — |
+| Q1 | [URL Shortener](docs/questions/01-url-shortener.md) | starter problem + ID generation deep dive | 3 hours |
+| Q2 | [Rate Limiter](docs/questions/02-rate-limiter.md) | algorithmic deep dives + distributed consistency | 3 hours |
+| Q3 | [Top-K / Heavy Hitters](docs/questions/03-top-k-heavy-hitters.md) | streaming algorithms + accuracy trade-offs | 3 hours |
+| Q4 | [Chat System](docs/questions/04-chat-system.md) | real-time implementation: transport choice (MQTT/WebSocket) / connection lifecycle & session resume / delivery paths for the three tick types / ephemeral signals / E2EE | 3 hours |
+| Q5 | [News Feed](docs/questions/05-news-feed.md) | Push vs Pull / Fan-out / consistency | 3 hours |
+| Q6 | [Distributed Message Queue](docs/questions/06-distributed-message-queue.md) | storage model / delivery guarantees / Kafka comparison | 3 hours |
+| Q7 | [Ticket Booking System](docs/questions/07-ticket-booking.md) | concurrency control / strong consistency / queueing | 3 hours |
+| Q8 | [Ad Click Aggregator](docs/questions/08-ad-click-aggregator.md) | stream processing / Exactly-once / billing accuracy | 3 hours |
+| 07 | [Real-World System Case Studies](docs/07-real-systems-case-studies.md) | Netflix / Uber / classic paper breakdowns | ongoing |
+| 08 | [Company Style Guide](docs/08-company-guides.md) | Meta Pirate / Google / Amazon differences | 0.5 day |
+| 09 | [Resource Map](docs/09-resources.md) | websites / videos / books / papers, categorized by use | — |
+| 10 | [6-Week Study Plan](docs/10-study-plan.md) | weekly plan + mock schedule | — |
 
-## 使用方式
+## How to Use This
 
-1. **第 1 周**：read 01–04，把 rubric 和 framework internalize。这不是知识，是「考试 rule」。
-2. **第 2–5 周**：05 过一遍 building blocks，然后进入 06 + Q1–Q8 classic problems 训练。每道题**必须自己先做 45 分钟模拟**，再看讲义对照。
-3. **全程**：每周至少 1–2 次 mock（真人优先，[Interviewing.io](https://interviewing.io) / 朋友 / AI 都行）。
-4. **临考前 1 周**：过 08 company style + retrospective 所有 mock 的失败点。
+1. **Week 1**: read 01–04 and internalize the rubric and the framework. This is not knowledge; these are the exam rules.
+2. **Weeks 2–5**: go through the building blocks in 05, then move into 06 + the Q1–Q8 classic problems. For every problem, **you must run a 45-minute mock yourself first**, then compare against the lecture notes.
+3. **Throughout**: at least 1–2 mocks per week (live humans preferred — [Interviewing.io](https://interviewing.io) / friends / AI all work).
+4. **Final week before the interview**: review 08 company styles + retrospect on the failure points from all your mocks.
 
-## core 信念（来自所有主流 resource 的 consensus）
+## Core Beliefs (the consensus across all mainstream resources)
 
-- **没有唯一正确答案**——评估的是你 trade-off 取舍的过程，不是 takeaway。
-- **沟通占比 20%**——一半脑子设计，一半脑子讲清楚。
-- **Depth > Breadth**——E5 要在至少一个 subsystem 深入到 data model / consistency / bottleneck 层面。
-- **Mock 是最大杠杆**——看 100 个 videos 不如做 1 次被虐的 mock。
+- **There is no single correct answer** — you are evaluated on the process of weighing trade-offs, not on the takeaway.
+- **Communication is 20% of the score** — half your brain designs, half your brain explains.
+- **Depth > Breadth** — E5 requires going deep on at least one subsystem down to the data model / consistency / bottleneck level.
+- **Mocks are the biggest lever** — watching 100 videos is worth less than 1 mock that beats you up.
 
 ## License
 
-MIT — 随便用，欢迎 PR 补充你被面到的题。
+MIT — use it freely, and PRs adding questions you were asked are welcome.

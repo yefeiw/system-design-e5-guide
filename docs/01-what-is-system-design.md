@@ -1,105 +1,105 @@
 # 01 · What Is the System Design Interview
 
-> 本章回答三个问题：这场面试**到底在考什么**、有**哪几种 formats**、interviewer**按什么标准打分**。
+> This chapter answers three questions: what this interview is **actually testing**, what **formats** exist, and what standard the interviewer **scores you against**.
 
-## 1. 各家权威 definitions
+## 1. Authoritative definitions
 
-### Design Gurus（Grokking 系列出品方）
+### Design Gurus (the Grokking series)
 
-> "system 设计面试是一个开放式技术面试：你被 requirement 从零开始设计一个大 scale distributed system。它没有唯一正确答案——评估的是你**澄清需求、handling ambiguity、并做出关键 architecture 决策**的能力。"
+> "The system design interview is an open-ended technical interview: you are asked to design a large-scale distributed system from scratch based on requirements. There is no single correct answer — you are evaluated on your ability to **clarify requirements, handle ambiguity, and make key architecture decisions**."
 
-这是最标准的教科书式 definitions。注意两个关键词：**开放式**（意味着主动权在你）和**没有对错**（意味着评分的是过程）。
+This is the most standard, textbook definition. Note two key phrases: **open-ended** (which means the initiative is yours) and **no right or wrong** (which means the process is what gets scored).
 
-### Hello Interview（FAANG 前 interviewer 团队，目前最好的免费 resource）
+### Hello Interview (a team of former FAANG interviewers, currently the best free resource)
 
-他们不纠结 definitions，直接给评分表。他们对 System Design 面试的理解是：
+They don't fuss over definitions — they hand you a scorecard directly. Their understanding of the System Design interview:
 
-> 一场 45 分钟的协作设计 session，interviewer 扮演资深同事/评审者的角色，看你如何把一个模糊的产品需求变成一个可辩护的技术 architecture。
+> A 45-minute collaborative design session in which the interviewer plays the role of a senior colleague / reviewer, watching how you turn a vague product requirement into a defensible technical architecture.
 
-### System Design Primer（GitHub ~280k star）
+### System Design Primer (GitHub ~280k stars)
 
-> "学习如何设计大 scale system。帮助你成为更好的工程师，并附带面试准备。"
+> "Learn how to design large-scale systems. Prep for the system design interview, and become a better engineer."
 
-定位是 resource 总纲：按主题（load balancing、consistency、CDN、cache……）组织知识，附 classic problems 与参考答案。适合当地图用，不适合当路线用。
+Its role is that of a master resource index: knowledge organized by topic (load balancing, consistency, CDN, caching, ...) with classic problems and reference answers attached. Good as a map, not as a route.
 
 ### System Design Handbook
 
-强调一个所有 senior 都该刻在脑子里的观念：
+Emphasizes an idea every senior engineer should burn into their brain:
 
-> **不存在完美的设计。每一个选择都有 cost。** 好的设计不是「最优解」，而是在给定约束下最合理的折中。
+> **There is no perfect design. Every choice has a cost.** Good design is not the "optimal solution" — it is the most reasonable compromise under the given constraints.
 
-另外一个冷知识：Meta 内部把 system 设计轮叫 **"Pirate" 轮**（因为主持这轮的 interviewer 小组代号 "Pirates"），近年又分化出偏 API/产品设计的 **"Pirate X"**（see [08 Company Style Guide](08-company-guides.md)）。
+A piece of trivia: Meta internally calls its system design round the **"Pirate" round** (the interviewer group that runs it goes by the codename "Pirates"), and in recent years it has split off a **"Pirate X"** variant focused on API / product design (see [08 Company Style Guide](08-company-guides.md)).
 
-## 2. 面试的四种 formats
+## 2. The four interview formats
 
-按 Design Gurus 的分类（E5 backend 方向 90% 是第一种）：
+Per the Design Gurus taxonomy (90% of E5 backend interviews are the first type):
 
-| types | 考什么 | classic problems | 出现 scenario |
-|------|--------|--------|---------|
-| **backend / distributed system 设计** | 可 scaling architecture、data modeling、bottleneck 分析 | short URL、Feed、ticketing system | backend/全栈 E5 主战场 |
-| **API 设计** | REST semantics、resource 建模、版本化、pagination | 设计 Twitter API、payment webhook | 部分公司独立一轮 |
-| **frontend system 设计** | 组件 architecture、state 管理、渲染性能 | 设计 Netflix 播放器、表格组件 | frontend 岗专属 |
-| **OO 设计（OOD）** | 类图、设计模式、领域建模 | 设计停车场、象棋 | 多见于中小厂 |
+| Type | What it tests | Classic problems | Where it appears |
+|------|---------------|------------------|------------------|
+| **backend / distributed system design** | scalable architecture, data modeling, bottleneck analysis | short URL, Feed, ticketing system | the main battleground for backend/full-stack E5 |
+| **API design** | REST semantics, resource modeling, versioning, pagination | design the Twitter API, payment webhook | a standalone round at some companies |
+| **frontend system design** | component architecture, state management, rendering performance | design the Netflix player, a table component | frontend roles only |
+| **OO design (OOD)** | class diagrams, design patterns, domain modeling | design a parking lot, a chess game | mostly at small and mid-size companies |
 
-> Meta 特别提示：E5 可能遇到 **Product Architecture 轮**（偏 API/data modeling/user flow）而非传统 System Design 轮（偏基础设施/scalability）。rubric 相同，但 deep dive 方向不同——见过太多人按纯 backend 准备结果撞上 Product Architecture。
+> Meta-specific warning: at E5 you may hit a **Product Architecture round** (API / data modeling / user flow focused) instead of a traditional System Design round (infrastructure / scalability focused). The rubric is the same, but the deep dive direction differs — I've seen too many people prepare as pure backend and then collide with Product Architecture.
 
-## 3. four-dimension rubric（Hello Interview Rubric）
+## 3. The four-dimension rubric (Hello Interview Rubric)
 
-这是目前公开最接近大厂内部评分表的 framework，**四个 dimension、按百分比加权**：
+This is currently the publicly available framework that comes closest to the internal scorecards at big tech — **four dimensions, percentage-weighted**:
 
 ### 3.1 Problem Navigation — 30%
 
-- **主动澄清**：scale（QPS / DAU / data 量）、read/write ratio、consistency requirement、latency budget、client types
-- **scope narrowing**：明确说出「我打算先做 X，Y 放到 follow-up」——interviewer 最怕你什么都想做
-- **对齐 definitions**：把模糊词翻译成具体 feature（「快」是多快？「活跃 user」怎么 definitions？）
+- **Proactive clarification**: scale (QPS / DAU / data volume), read/write ratio, consistency requirements, latency budget, client types
+- **Scope narrowing**: explicitly saying "I plan to build X first and defer Y to follow-ups" — what interviewers fear most is a candidate who wants to do everything
+- **Aligning on definitions**: translating vague words into concrete features (how fast is "fast"? how is an "active user" defined?)
 
 ### 3.2 Solution Design — 30%
 
-- 高层 architecture 清晰：画得出 component diagram，说得清 data flow 向
-- 能覆盖 core feature 与 non-functional requirements（availability、scalability、latency）
-- **approach 与需求 matching**：日活 1 万的 system 不要上来就 sharding + multi-region DR（over-engineering 在 E5 是减分项）
+- A clear high-level architecture: you can draw the component diagram and explain the data flows
+- Covers both core features and non-functional requirements (availability, scalability, latency)
+- **The approach matches the requirements**: a system with 10k DAU should not open with sharding + multi-region DR (over-engineering is a penalty at E5)
 
 ### 3.3 Technical Depth & Differentiation — 20%
 
-- deep dive 至少一个 subsystem 到实现层面：storage engine selection、index 设计、consistency 协议、failure 模式
-- 能讲清 trade-off：「选 A，cost 是 X，因为我们的 scenario 里 X acceptable 而 Y 不 acceptable」
-- 展现超出「standard answers」的理解：知道常见 approach 的坑（如 Redis cache invalidation storm、Kafka partition skew）
+- Deep dive on at least one subsystem down to the implementation level: storage engine selection, index design, consistency protocols, failure modes
+- Can articulate the trade-off: "I pick A, the cost is X, because in our scenario X is acceptable and Y is not"
+- Shows understanding beyond the "standard answers": knows the real pitfalls of common approaches (e.g., Redis cache invalidation storms, Kafka partition skew)
 
 ### 3.4 Communication & Collaboration — 20%
 
-- structure 化表达：先总后分，随时让 interviewer 知道你在哪一层
-- **接受引导**：interviewer 纠偏时快速调整而不是硬扛（interviewer 的 hint 是礼物）
-- 驾驭 whiteboard：图要能 read 懂，draw-as-you-talk
+- Structured delivery: top-down, always letting the interviewer know which layer you're on
+- **Accepting steering**: when the interviewer corrects course, you adjust quickly instead of digging in (an interviewer's hint is a gift)
+- Commanding the whiteboard: diagrams that others can actually read, draw-as-you-talk
 
-> 注意 30/30/20/20 这个 structure 传递的 signal：**「走对了流程」和「approach 合理」占 60 分，比「技术多硬核」更重要**。很多人挂在这一关不是因为技术差，而是因为流程失控——不问需求直接画图，或者被自己带进死角出不来。
+> Note the signal carried by the 30/30/20/20 structure: **"running the right process" and "a sound approach" are 60 points — more important than how hardcore your tech is**. Many people fail this round not because their tech is weak, but because they lose control of the process — drawing diagrams without asking about requirements, or walking themselves into a dead end they can't escape.
 
-## 4. interviewer 在打分时实际在想什么
+## 4. What the interviewer is actually thinking while scoring
 
-把 rubric 翻译成 interviewer 的内心 OS：
+The rubric translated into the interviewer's inner monologue:
 
-| Rubric 条目 | interviewer 内心 OS |
-|------------|--------------|
-| 主动澄清 | 「我还没给需求，他就把该问的都问了」 |
-| scope narrowing | 「他知道什么重要什么不重要，像个做过线上 system 的人」 |
-| approach matching 需求 | 「这个 scale 这个 approach 刚好，不过度也不过简」 |
-| deep dive trade-off | 「他不只是 read 过 ByteByteGo，他知道这些组件真实的坑」 |
-| 接受引导 | 「我 hint 了一句他立刻调头，合作起来会很舒服」 |
+| Rubric item | Interviewer's inner monologue |
+|-------------|-------------------------------|
+| Proactive clarification | "I hadn't given any requirements yet, and they'd already asked everything that needed asking" |
+| Scope narrowing | "They know what matters and what doesn't — like someone who has run production systems" |
+| Approach matching requirements | "For this scale, this approach is just right — not over-built, not under-built" |
+| Deep dive trade-offs | "They haven't just read ByteByteGo — they know the real pitfalls of these components" |
+| Accepting steering | "I dropped one hint and they turned on a dime — easy to collaborate with" |
 
-**E5 的 dividing line**：E4 interviewer 拉着你走完全程也能过；E5 必须是你驱动全程，interviewer 只是在 review 你的设计。
+**The E5 dividing line**: at E4 you can pass even if the interviewer drags you through the whole thing; at E5 you must drive the entire session, with the interviewer merely reviewing your design.
 
-## 5. 一场 45 分钟面试的真实解剖
+## 5. Anatomy of a real 45-minute interview
 
 ```
-0:00–2:00 interviewer 介绍题目（很模糊的一句话）
-2:00–7:00 你澄清需求、estimation scale、definitions scope ← Navigation
-7:00–20:00 high-level design：component diagram + API + data model ← Design
-20:00–38:00 deep dive 2–3 个 subsystem（interviewer 选方向） ← Depth
-38:00–43:00 bottleneck、monitoring、failure、scaling、wrap-up ← Depth + wrap-up
-43:00–45:00 你的提问
+0:00–2:00  Interviewer presents the problem (a deliberately vague one-liner)
+2:00–7:00  You clarify requirements, estimate scale, define scope      ← Navigation
+7:00–20:00 High-level design: component diagram + API + data model   ← Design
+20:00–38:00 Deep dive on 2–3 subsystems (interviewer picks direction) ← Depth
+38:00–43:00 Bottlenecks, monitoring, failure, scaling, wrap-up        ← Depth + wrap-up
+43:00–45:00 Your questions
 ```
 
-每一阶段的具体打法见 [03 delivery framework](03-delivery-framework.md)。
+For the concrete playbook per phase, see [03 delivery framework](03-delivery-framework.md).
 
 ## Next Module
 
-→ [02 · E5/Senior 的 Expectations](02-e5-senior-expectations.md)
+→ [02 · E5/Senior Expectations](02-e5-senior-expectations.md)

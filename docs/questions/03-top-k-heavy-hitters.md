@@ -1,100 +1,100 @@
 # Q3 · Top-K / Heavy Hitters
 
-> Difficulty: Medium ｜ archetype：write-heavy + peak shaving（streaming algorithm）
-> E5 high-frequency problems。考的是**accuracy vs memory vs latency**的三角 trade-off，一道题覆盖整个流处理世界观。
+> Difficulty: Medium | archetype: write-heavy + peak shaving (streaming algorithms)
+> A high-frequency E5 problem. What it tests is the **accuracy vs memory vs latency** triangle, and one problem covers the entire streaming worldview.
 
 ## 1. Problem Statement
 
-"设计一个 system，real-time 统计我们 service 中访问量最高的 10 个 URL / 被播放最多的歌曲 / 最热门的标签，比如按小时和按天两个粒度。"
+"Design a system that computes, in real time, the top 10 most-visited URLs / most-played songs / hottest tags in our service, at two granularities such as hourly and daily."
 
 ## 2. Clarifying Questions
 
-| 问题 | intent |
+| Question | Intent |
 |------|------|
-| "real-time"要多 real-time？（second-level / minute-level / hour-level）| 决定整套 architecture 是流还是批 |
-| Top-K 要**exact**还是**approximate**（±1% error margin acceptable 吗）| 本题最重要的问题，直接决定 algorithm |
-| 并列第 K 名怎么处理？ | boundary awareness |
-| 全量所有时间 vs 滚动 window？ | 决定要不要 window aggregation |
-| traffic 多大？（1B events/day order of magnitude?）| memory 可行性计算 |
+| How real-time does "real-time" need to be? (second-level / minute-level / hour-level) | Determines whether the whole architecture is streaming or batch |
+| Does Top-K need to be **exact** or **approximate** (is a ±1% error margin acceptable)? | The most important question here; it directly determines the algorithm |
+| How do we handle ties at rank K? | Boundary awareness |
+| All-time totals vs a rolling window? | Determines whether window aggregation is needed |
+| How much traffic? (on the order of 1B events/day?) | Memory feasibility math |
 
 ## 3. Estimation Walkthrough
 
 ```
-1B events/day ≈ 12K events/s average，peak ×5 ≈ 60K/s
-dedup 后不同 item 数（cardinality）：假设 100M 个不同 URL
-exact counter memory = 100M × (8B key 指纹 + 8B counter) ≈ 1.6GB —— 其实可行！
-takeaway → 先问清楚：如果 cardinality 可控，exact approach memory 扛得住，别急着上 approximate algorithm
+1B events/day ≈ 12K events/s average, peak ×5 ≈ 60K/s
+distinct items after dedup (cardinality): assume 100M distinct URLs
+exact counter memory = 100M × (8B key fingerprint + 8B counter) ≈ 1.6GB — actually feasible!
+takeaway → ask first: if cardinality is bounded, the exact approach's memory holds up, so don't rush to an approximate algorithm
 ```
 
-**这步是 E5 关键**：很多人背了 Count-Min Sketch 就无脑上，但 100M cardinality exact hash table 也就 2GB，single machine 都放得下。**先算，再选 algorithm**。
+**This step is the E5 key**: plenty of people memorize Count-Min Sketch and reach for it blindly, but an exact hash table for 100M cardinality is only 2GB, which fits on a single machine. **Do the math first, then pick the algorithm**.
 
 ## 4. High-Level Design
 
 ```
-event 源 ──▶ Kafka（按 item_id partition，保证同 key 聚到同一 partition）
+event source ──▶ Kafka (partition by item_id, so the same key lands on the same partition)
               │
-              ├──▶ stream aggregator（每 partition 维护 item→count hash table + min-heap(top K)）
-              │ │ 周期性（minute-level）输出 (item, count)
+              ├──▶ stream aggregator (each partition keeps an item→count hash table + a min-heap (top K))
+              │ │ periodically (minute-level) emits (item, count)
               │ ▼
-              │ aggregation Top-K merger ──▶ query service（Redis/memory 存当前 Top-K）
+              │ aggregation Top-K merger ──▶ query service (Redis/memory holding the current Top-K)
               │
-              └──▶ data lake（raw event 留存，nightly batch processing 校正 = exact fallback）
+              └──▶ data lake (raw events retained; nightly batch processing corrects = exact fallback)
 ```
 
-**architecture 叙事**："hot path Kafka 按 partition 分流，每 partition 流式 counter + local Top-K heap，轻量 merge 层把各 partition local Top-K merge 成 global——因为 **local Top-K 的并集必然包含 global Top-K**（每项的 global counter ≥ 任一 partition local counter，第 K 名在它最强的那个 partition 里必然进 local Top-K），所以 merger 只需要处理 K×partition count 个 candidates，不需要全量 ranking。"
+**Architecture narrative**: "The hot path fans out through Kafka by partition; each partition maintains a streaming counter plus a local Top-K heap, and a lightweight merge layer merges the per-partition local Top-Ks into the global Top-K—because **the union of the local Top-Ks necessarily contains the global Top-K** (every item's global counter is ≥ its local counter in any partition, so the item ranked K globally must land in the local Top-K of the partition where it is strongest). That means the merger only has to process K×partition count candidates, not a full ranking."
 
-能讲出上面括号里那个论证，就是这道题的 E5 时刻。
+Being able to deliver the argument in that parenthesis is the E5 moment of this problem.
 
 ## 5. Data Model
 
-- partition 内：`HashMap<item_id, count>` + min-heap（size K，O(n log K)）
-- window data：minute-level local aggregation 落 Redis / 按小时 partition 落 Parquet
-- service tier：`(window, rank) → (item, count)`，短 TTL
+- Within a partition: `HashMap<item_id, count>` + min-heap (size K, O(n log K))
+- Window data: minute-level local aggregation lands in Redis / hourly partitions land in Parquet
+- Service tier: `(window, rank) → (item, count)`, short TTL
 
 ## 6. Deep Dives
 
-### Deep Dive A · memory 不够怎么办：approximate algorithm 家族
+### Deep Dive A · What if memory isn't enough: the approximate algorithm family
 
-当 cardinality 到几十亿、exact hash table 放不下时：
+When cardinality reaches the billions and an exact hash table no longer fits:
 
-| algorithm | 空间 | error margin 方向 | 备注 |
+| Algorithm | Space | Error margin direction | Notes |
 |------|------|---------|------|
-| Count-Min Sketch | O(k/ε·log n) | **只高不低**（one-way error margin）| 重击者 error margin 相对小；可 merge（各 partition sketch 可相加）|
-| Space-Saving | O(K/ε) | one-way | 直接维护 approximate Top-K，工程常用 |
-| Lossy Counting | batch processing 式 | one-way | 老牌但已被前两者盖过 |
+| Count-Min Sketch | O(k/ε·log n) | **Overestimates only** (one-way error margin) | Relatively small error margin on heavy hitters; mergeable (per-partition sketches can be summed) |
+| Space-Saving | O(K/ε) | One-way | Maintains an approximate Top-K directly; common in production |
+| Lossy Counting | Batch-processing style | One-way | Long-established but overtaken by the previous two |
 
-E5 表达："approximate algorithm 在重击者（heavy hitter）上的相对 error margin 小——counter 100 万的 item 估成 102 万无所谓；error margin 全集中在 long tail，而 long tail 本来就不进 Top-K。**这就是 approximate algorithm 恰好适配 Top-K 问题的原因**，不是巧合是 structure。"
+E5 framing: "Approximate algorithms have a small relative error margin on heavy hitters—an item with a true count of 1 million being estimated at 1.02 million doesn't matter; the error margin is concentrated entirely in the long tail, and the long tail would never make the Top-K anyway. **That's why approximate algorithms fit the Top-K problem so well**—it isn't a coincidence, it's structure."
 
-以及必说的 fallback："approximate 给 real-time 视图，nightly batch processing（Spark/Beam 对全天 data exact recompute）覆盖修正——**lambda architecture 的取舍**：real-time layer 牺牲精度，batch layer 牺牲时效，query 层 merge。"
+And the fallback you must mention: "Approximate gives you the real-time view, and nightly batch processing (Spark/Beam exactly recomputing the whole day's data) corrects it—**the lambda architecture trade-off**: the real-time layer sacrifices accuracy, the batch layer sacrifices timeliness, and the query layer merges the two."
 
-### Deep Dive B · window semantics
+### Deep Dive B · Window semantics
 
-- 滚动 window（tumbling）vs sliding window（sliding）vs session window——**主动问 interviewer 要哪种**
-- sliding window 的流式实现：分钟 bucket + approximate combination（"最近 60 分钟 = 最近 60 个分钟 bucket 求和"，error margin ≤ 1 分钟 bucket）
-- out-of-order event：watermark 机制——"data late-arriving 5 分钟内我会更新结果，超过 watermark 的丢进 side output offline 补偿"
+- Tumbling windows vs sliding windows vs session windows—**proactively ask the interviewer which one they want**
+- Streaming implementation of a sliding window: minute buckets plus approximate combination ("the last 60 minutes = the sum of the last 60 minute buckets," with an error margin of at most one minute bucket)
+- Out-of-order events: the watermark mechanism—"data arriving up to 5 minutes late still updates the result; anything past the watermark goes to a side output for offline compensation"
 
-### Deep Dive C · consistency 与 failure
+### Deep Dive C · Consistency and failure
 
-- aggregator 挂了 → Kafka offset 还在，**从上次提交的 offset replay**（at-least-once）
-- 重复 counter 怎么处理：idempotent（offset + item combination dedup window）或接受 error margin（counter 类 business 通常 acceptable）
-- "如果这是**billing**不是统计呢？"——那就不能用 at-least-once 糊弄，要 exactly-once（Kafka transaction / two-phase commit）或 event sourcing + reconciliation。**问出这题就是 interviewer 在测你懂不懂 delivery semantics 的 cost**
+- An aggregator dies → the Kafka offset is still there, so **replay from the last committed offset** (at-least-once)
+- How to handle duplicate counts: idempotency (dedup window on the offset + item combination) or accept the error margin (usually acceptable for a counting business)
+- "What if this were **billing** instead of analytics?"—then you can't hand-wave with at-least-once; you need exactly-once (Kafka transactions / two-phase commit) or event sourcing plus reconciliation. **Asking that question is the interviewer testing whether you understand the cost of delivery semantics**
 
-### Deep Dive D · query 侧
+### Deep Dive D · The query side
 
-- Top-K query QPS 高 → 预计算 + Redis cache，refresh 频率 = business"real-time"requirement
-- 多 dimension Top-K（按国家×按品类）→ dimension combination 爆炸，只预计算 high-frequency combination，long tail 走 on-the-fly aggregation
+- Top-K query QPS is high → precompute plus a Redis cache, with the refresh frequency set by what the business means by "real-time"
+- Multi-dimensional Top-K (by country × by category) → the number of dimension combinations explodes, so precompute only the high-frequency combinations and let the long tail go through on-the-fly aggregation
 
 ## 7. Red Flags
 
-- 上来就 Count-Min Sketch（没先算 exact approach 的 memory 可行性）
-- 把全量 event 塞进一个 global heap（没有 partition local Top-K 的洞察）
-- "real-time"不问清楚就开始设计
-- 讲不出 local Top-K merge 的 correctness 论证
-- data 丢了就丢了，没 delivery semantics awareness
+- Reaching for Count-Min Sketch immediately (without first doing the memory feasibility math on the exact approach)
+- Funneling every event into one global heap (missing the per-partition local Top-K insight)
+- Starting to design without clarifying what "real-time" means
+- Being unable to give the correctness argument for the local Top-K merge
+- Treating dropped data as no big deal, with no awareness of delivery semantics
 
 ## 8. One-Minute Elevator Pitch
 
-"event 进 Kafka 按 item partition，每 partition 流式维护 counter hash + min-heap，local Top-K merge 出 global——merge 的 correctness 来自 global 第 K 名必然是其最强 partition 的 local 前 K。cardinality 一亿内 exact hash 才 2GB，我先算再决定要不要 approximate；cardinality 到十亿级换 Count-Min Sketch（error margin one-way 且集中在 long tail，恰好不伤 Top-K），nightly batch processing 做 exact fallback，这就是 lambda。window semantics、late data watermark、at-least-once replay 的重复 counter——统计 business acceptable，billing business 必须换 exactly-once，cost 是 throughput 减半。"
+"Events go into Kafka partitioned by item; each partition maintains a streaming counter hash plus a min-heap, and the local Top-Ks merge into the global Top-K—the correctness of that merge comes from the fact that the item ranked K globally must be in the local top K of the partition where it is strongest. Within 100M cardinality an exact hash is only 2GB, so I do the math before deciding whether I need an approximate algorithm; at billion-scale cardinality I switch to Count-Min Sketch (the error margin is one-way and concentrated in the long tail, so it happens not to hurt the Top-K), with nightly batch processing as the exact fallback—that's lambda. Window semantics, late-data watermarks, duplicate counters from at-least-once replay—acceptable for an analytics business, but a billing business has to switch to exactly-once, and the cost is halving throughput."
 
 ---
-← [Q2 rate limiter](02-rate-limiter.md) ｜ [Q4 chat system →](04-chat-system.md)
+← [Q2 rate limiter](02-rate-limiter.md) | [Q4 chat system →](04-chat-system.md)
